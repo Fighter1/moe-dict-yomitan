@@ -1,0 +1,24 @@
+{
+  "concised": {
+    "upstream": "dict_concised_2014",
+    "version": "20250925",
+    "path": "dict/dict_concised_2014_20250925.xlsx"
+  },
+  "concisedPics": {
+    "upstream": "dict_concised_pic_2014",
+    "version": "20250925",
+    "path": "dict/dict_concised_pic_2014_20250925",
+    "index": "dict/dict_concised_pic_2014_20250925.xlsx"
+  },
+  "revised": {
+    "upstream": "dict_revised_2015",
+    "version": "20251229",
+    "path": "dict/dict_revised_2015_20251229.xlsx"
+  },
+  "liangan": {
+    "repo": "g0v/moedict-data-csld",
+    "file": "兩岸詞典.xlsx",
+    "blobSha": "871bb1f20362392aa79d87b447ef442a76b07210",
+    "path": "dict/liangancidian.xlsx"
+  }
+}

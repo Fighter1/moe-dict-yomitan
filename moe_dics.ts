@@ -1,13 +1,12 @@
 import { Dictionary, TermEntry } from "yomichan-dict-builder";
 import { readdirSync, readFileSync } from "fs";
 import { read, utils } from "xlsx";
-import _OpenCC from "opencc";
+import { OpenCC } from "opencc";
 import type {
   StructuredContent,
   StructuredContentNode,
 } from "yomichan-dict-builder/dist/types/yomitan/termbank";
 import { hasReading, readingSpans, type SystemReadings } from "./readings.ts";
-const { OpenCC } = _OpenCC;
 
 const someEntry = {
   __rowNum__: 2541,

@@ -1,0 +1,52 @@
+name: Build and check
+
+# Every push to main and every pull request: typecheck, build the six dictionaries and validate
+# them against Yomitan's schemas. Publishes nothing; the zips are kept as a workflow artifact.
+# Releases come from the manually started "Build and release" workflow.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        # No REVISION: export.ts stamps the UTC date with ".0", below any release of that day.
+        run: npm run build
+
+      - name: Validate
+        run: npm run validate
+
+      - name: Upload the zips
+        uses: actions/upload-artifact@v7
+        with:
+          name: dictionaries
+          retention-days: 7
+          path: |
+            build/*.zip
+            build/index-*.json

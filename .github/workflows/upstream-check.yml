@@ -1,0 +1,58 @@
+name: Upstream check
+
+# Weekly: compare dict/sources.json with the MOE download pages and the g0v repository. When a
+# newer sheet is offered, open (or refresh) an issue listing it. Downloads nothing and changes no
+# files. If issues are disabled for the repository the run fails instead, so the owner is notified.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: upstream-check
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      - name: Compare dict/sources.json with upstream
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ github.token }} # raises the GitHub API rate limit
+        run: |
+          node scripts/upstream-check.ts
+          cat reports/upstream.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open or update the issue
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          title="Upstream sources changed"
+          if [ "$(gh repo view --json hasIssuesEnabled --jq .hasIssuesEnabled)" != "true" ]; then
+            echo "::error::newer source sheets are available (see the job summary); enable issues to get an issue instead of a failed run"
+            exit 1
+          fi
+          number="$(gh issue list --state open --search "in:title \"$title\"" --json number,title \
+            --jq "[.[] | select(.title == \"$title\")][0].number // empty")"
+          if [ -z "$number" ]; then
+            gh issue create --title "$title" --body-file reports/upstream.md
+          else
+            gh issue edit "$number" --body-file reports/upstream.md
+          fi

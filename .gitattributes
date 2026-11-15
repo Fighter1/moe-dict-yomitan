@@ -1,0 +1,8 @@
+# LF in the repository and in every checkout, so a build on Windows matches the release workflow.
+* text=auto eol=lf
+
+*.xlsx binary
+*.jpg binary
+*.gif binary
+*.png binary
+*.zip binary

@@ -1,0 +1,26 @@
+version: 2
+
+# Weekly. Minor and patch npm updates arrive as one pull request; each major gets its own, so a
+# breaking one cannot hold the rest back. "Build and check" builds and validates the dictionaries
+# on each of them. Not covered: xlsx is installed from a tarball URL (cdn.sheetjs.com), which
+# Dependabot does not track.
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+    ignore:
+      # Follows the Node version in .nvmrc; raise the two together.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

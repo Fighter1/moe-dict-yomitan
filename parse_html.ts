@@ -1,4 +1,4 @@
-import { DOMParser } from "@xmldom/xmldom";
+import { DOMParser, type Element, type Node } from "@xmldom/xmldom";
 import type {
   StructuredContent,
   StructuredContentNode,
@@ -57,7 +57,7 @@ function parseStyle(s: string): StructuredContentStyle {
   return style;
 }
 
-function add(node: ChildNode): StructuredContentNode {
+function add(node: Node): StructuredContentNode {
   switch (node.nodeName) {
     case "table":
     case "tbody":
@@ -94,7 +94,7 @@ export default function parse_html(data: string): StructuredContent {
     content: [],
     data: { moedict: "meaning-parent" },
   };
-  Array.from(doc.childNodes.item(0).childNodes).forEach((node) => {
+  Array.from(doc.childNodes.item(0)?.childNodes ?? []).forEach((node) => {
     (content.content as StructuredContentNode[]).push(add(node));
   });
   return content;

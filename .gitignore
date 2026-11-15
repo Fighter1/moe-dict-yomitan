@@ -1,4 +1,4 @@
-# dependencies (bun install)
+# dependencies (npm ci)
 node_modules
 
 # output
@@ -34,6 +34,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .DS_Store
 
 build/
+
+# written by the build and the scripts (stats, release notes, upstream report)
+reports/
 
 fix-eye.ts
 

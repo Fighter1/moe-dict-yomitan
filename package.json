@@ -3,19 +3,28 @@
   "module": "export.ts",
   "type": "module",
   "private": true,
-  "devDependencies": {
-    "@types/node": "24.2.0",
-    "ts-node": "^10.9.2"
+  "engines": {
+    "node": ">=22.18"
   },
-  "peerDependencies": {
-    "typescript": "^5"
+  "scripts": {
+    "build": "node export.ts",
+    "typecheck": "tsc --noEmit",
+    "validate": "node scripts/validate.ts",
+    "release-notes": "node scripts/release-notes.ts",
+    "upstream-check": "node scripts/upstream-check.ts"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "ajv": "^8.20.0",
+    "jszip": "^3.10.2",
+    "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@xmldom/xmldom": "^0.8.11",
-    "opencc": "github:BYVoid/OpenCC",
+    "@xmldom/xmldom": "^0.9.12",
+    "opencc": "^1.4.2",
     "pinyin-tone-tool": "^1.0.5",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
-    "yomichan-dict-builder": "^2.9.2"
+    "yomichan-dict-builder": "^2.11.4"
   },
   "trustedDependencies": [
     "opencc"

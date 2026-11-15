@@ -1,0 +1,50 @@
+# Entries every build must contain: zip name without .zip, term, reading (tab-separated).
+# scripts/validate.ts fails the build when one is missing, so a parser change that drops or mangles
+# them is caught before a release. Covers plain words, several readings of one character, the
+# simplified headword rows, the neutral tone, erhua, a missing apostrophe in the sheet (南歐) and
+# characters outside the BMP.
+liangancidian-pinyin	學習	xué xí
+liangancidian-pinyin	学习	xué xí
+liangancidian-pinyin	長	cháng
+liangancidian-pinyin	長	zhǎng
+liangancidian-pinyin	的	de
+liangancidian-pinyin	媽媽	mā ma
+liangancidian-pinyin	熱鬧	rè nao
+liangancidian-pinyin	杌隉	wù niè
+liangancidian-pinyin	一頭兒沉	yì tóur chén
+liangancidian-pinyin	南歐	nán ōu
+liangancidian-pinyin	坎𡒄	kǎn lǎn
+liangancidian-zhuyin	學習	ㄒㄩㄝˊㄒㄧˊ
+liangancidian-zhuyin	長	ㄓㄤˇ
+liangancidian-zhuyin	的	˙ㄉㄜ
+liangancidian-zhuyin	熱鬧	ㄖㄜˋ˙ㄋㄠ
+liangancidian-zhuyin	一頭兒沉	ㄧˋㄊㄡˊㄦㄔㄣˊ
+liangancidian-zhuyin	坎𡒄	ㄎㄢˇㄌㄢˇ
+moe-concised-pinyin	學習	xué xí
+moe-concised-pinyin	学习	xué xí
+moe-concised-pinyin	詞典	cí diǎn
+moe-concised-pinyin	一絲不苟	yì sī bù gǒu
+moe-concised-pinyin	長	cháng
+moe-concised-pinyin	長	zhǎng
+moe-concised-pinyin	的	de
+moe-concised-pinyin	媽媽	mā ma
+moe-concised-pinyin	𫗦	bū
+moe-concised-zhuyin	學習	ㄒㄩㄝˊㄒㄧˊ
+moe-concised-zhuyin	長	ㄓㄤˇ
+moe-concised-zhuyin	的	˙ㄉㄜ
+moe-concised-zhuyin	𫗦	ㄅㄨ
+moe-revised-pinyin	學習	xué xí
+moe-revised-pinyin	学习	xué xí
+moe-revised-pinyin	詞典	cí diǎn
+moe-revised-pinyin	一絲不苟	yī sī bù gǒu
+moe-revised-pinyin	長	cháng
+moe-revised-pinyin	長	zhǎng
+moe-revised-pinyin	的	de
+moe-revised-pinyin	拖後腿	tuō hòu tuǐ
+moe-revised-pinyin	一頭兒沉	yī tóur chén
+moe-revised-pinyin	𫐈	bá
+moe-revised-zhuyin	學習	ㄒㄩㄝˊㄒㄧˊ
+moe-revised-zhuyin	長	ㄓㄤˇ
+moe-revised-zhuyin	的	˙ㄉㄜ
+moe-revised-zhuyin	拖後腿	ㄊㄨㄛㄏㄡˋㄊㄨㄟˇ
+moe-revised-zhuyin	𫐈	ㄅㄚˊ

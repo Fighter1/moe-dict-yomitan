@@ -1,0 +1,105 @@
+name: Build and release
+
+# Manual: build the six dictionaries, validate them and publish them as the latest GitHub release,
+# so Yomitan's "Check for updates" picks them up. The revision in every index.json and the release
+# tag are the same value: UTC date + run number unless one is given.
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish a GitHub release (off: build only, zips kept as a workflow artifact)"
+        type: boolean
+        default: true
+      revision:
+        description: "index.json revision, four dot-separated integers (default: UTC date + run number, e.g. 2026.11.15.7)"
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        # Naming the shell makes Actions run it as `bash -eo pipefail`.
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Releases are published from the default branch
+        if: ${{ inputs.publish && github.ref_name != github.event.repository.default_branch }}
+        run: |
+          echo "::error::run this workflow on ${{ github.event.repository.default_branch }}, or turn 'publish' off for a build-only run"
+          exit 1
+
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Choose the revision
+        env:
+          # Passed through the environment, never pasted into the script text.
+          INPUT_REVISION: ${{ inputs.revision }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          rev="$INPUT_REVISION"
+          [ -n "$rev" ] || rev="$(date -u +%Y.%m.%d).$RUN_NUMBER"
+          if ! [[ "$rev" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]+$ ]]; then
+            echo "::error::revision '$rev' must be four dot-separated integers, e.g. 2026.11.15.7"
+            exit 1
+          fi
+          if gh release view "v$rev" > /dev/null 2>&1; then
+            echo "::error::release v$rev already exists"
+            exit 1
+          fi
+          echo "REVISION=$rev" >> "$GITHUB_ENV"
+          echo "revision $rev"
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Validate
+        run: node scripts/validate.ts --revision "$REVISION"
+
+      - name: Write the release notes
+        run: |
+          gh release view --json tagName,body > "$RUNNER_TEMP/previous.json" 2> /dev/null || echo '{}' > "$RUNNER_TEMP/previous.json"
+          node scripts/release-notes.ts --previous "$RUNNER_TEMP/previous.json"
+          cat reports/release-notes.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the zips as an artifact (build-only run)
+        if: ${{ !inputs.publish }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: dictionaries-${{ env.REVISION }}
+          retention-days: 7
+          path: |
+            build/*.zip
+            build/index-*.json
+            reports/release-notes.md
+
+      - name: Publish the release
+        if: ${{ inputs.publish }}
+        # --target: without it gh tags the branch head at publish time, which is not the built
+        # commit when something was pushed during the build.
+        run: |
+          gh release create "v$REVISION" build/*.zip build/index-*.json \
+            --target "$GITHUB_SHA" --title "v$REVISION" --latest \
+            --notes-file reports/release-notes.md --generate-notes

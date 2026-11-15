@@ -1,5 +1,5 @@
 import { readFileSync } from "fs";
-import { read, utils } from "xlsx";
+import { read, utils, type WorkSheet } from "xlsx";
 import { Dictionary, TermEntry } from "yomichan-dict-builder";
 import parse_html from "./parse_html.ts";
 import type {
@@ -58,6 +58,53 @@ const PINYIN_TYPOS: Record<string, string> = {
   "qiānr-bābǎ": "qiānr-bābǎi", // 千兒八百 (大陸) ㄅㄞˇ
   "mùyǔ-zhìfēn": "mùyǔ-zhìfēng", // 沐雨櫛風 (大陸) ㄈㄥ
 };
+
+// Definition cells that are wrong in the sheet itself: 正體字形 -> [text in the sheet, corrected text].
+const DEFINITION_FIXES: Record<string, [string, string]> = {
+  // the 也作 / [例] part is there twice
+  拖後腿: [
+    "也作「拉後腿」、「扯後腿」、「扯腿」。[例]前線打斷腿，後方～。也作「拉後腿」、「扯後腿」、「扯腿」。[例]前線打斷腿，後方～。",
+    "也作「拉後腿」、「扯後腿」、「扯腿」。[例]前線打斷腿，後方～。",
+  ],
+};
+
+// The sheet is read by column title, so a renamed column would silently empty a field.
+const REQUIRED_COLUMNS = [
+  "正體字形",
+  "簡化字形",
+  "音序",
+  "臺／陸特有詞",
+  "臺／陸特有音",
+  "臺灣音讀",
+  "臺灣漢拼",
+  "大陸音讀",
+  "大陸漢拼",
+  "釋義1",
+];
+
+/**
+ * The sheet numbers its definition columns with full-width digits (釋義１ … 釋義３０); the titles
+ * are rewritten with ASCII digits in place, and the columns this file reads are checked.
+ */
+function normalizeColumnTitles(sheet: WorkSheet, path: string) {
+  const range = utils.decode_range(sheet["!ref"]!);
+  const titles: string[] = [];
+  for (let c = range.s.c; c <= range.e.c; c++) {
+    const cell = sheet[utils.encode_cell({ r: range.s.r, c })];
+    if (!cell) continue;
+    const title = String(cell.v ?? "")
+      .trim()
+      .replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xfee0));
+    cell.v = title;
+    delete cell.w; // the cached display text, which sheet_to_json would use instead
+    titles.push(title);
+  }
+  const missing = REQUIRED_COLUMNS.filter((title) => !titles.includes(title));
+  if (missing.length)
+    throw new Error(
+      `${path} has no column ${missing.join(", ")}; its columns are: ${titles.join(" | ")}`,
+    );
+}
 
 function getContent(contentRow: string, term: string): StructuredContentNode {
   let note: StructuredContentNode = "";
@@ -181,6 +228,7 @@ export async function addTermsLiangAn(
   const fbLiangAn = readFileSync(path);
   const workbookLiangAn = read(fbLiangAn);
   const sheetLiangAn = workbookLiangAn.Sheets[workbookLiangAn.SheetNames[0]!]!;
+  normalizeColumnTitles(sheetLiangAn, path);
   const dataLiangAn = utils.sheet_to_json(sheetLiangAn) as LiangAnEntry[];
 
   let b = 0;
@@ -201,6 +249,10 @@ export async function addTermsLiangAn(
         entry[key] = (entry[key] ?? "").replaceAll("丨", "ㄧ");
         if (["臺灣音讀", "大陸音讀"].includes(key))
           entry[key] = entry[key].replace(/[ 　，]/g, "") ?? "";
+        else {
+          const fix = DEFINITION_FIXES[entry.正體字形];
+          if (fix) entry[key] = entry[key].replace(fix[0], fix[1]);
+        }
       } else if (key === "臺灣漢拼" || key === "大陸漢拼") {
         const cell = entry[key] ?? "";
         entry[key] = parsePinyin(PINYIN_TYPOS[cell] ?? cell, zhuyinAsTyped[key]);

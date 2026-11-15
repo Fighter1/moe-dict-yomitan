@@ -2,7 +2,8 @@
 # scripts/validate.ts fails the build when one is missing, so a parser change that drops or mangles
 # them is caught before a release. Covers plain words, several readings of one character, the
 # simplified headword rows, the neutral tone, erhua, a missing apostrophe in the sheet (南歐) and
-# characters outside the BMP.
+# characters outside the BMP. 八輩兒五沒根基 is filed under its 變 (variant) reading, which depends on
+# the 變體類型 column of the sheet.
 liangancidian-pinyin	學習	xué xí
 liangancidian-pinyin	学习	xué xí
 liangancidian-pinyin	長	cháng
@@ -48,3 +49,6 @@ moe-revised-zhuyin	長	ㄓㄤˇ
 moe-revised-zhuyin	的	˙ㄉㄜ
 moe-revised-zhuyin	拖後腿	ㄊㄨㄛㄏㄡˋㄊㄨㄟˇ
 moe-revised-zhuyin	𫐈	ㄅㄚˊ
+moe-revised-pinyin	八輩兒五沒根基	bá bèr wǔ méi gēn jī
+moe-revised-zhuyin	八輩兒五沒根基	ㄅㄚˊㄅㄜˋㄦㄨˇㄇㄟˊㄍㄣㄐㄧ
+liangancidian-pinyin	拖後腿	tuō hòu tuǐ

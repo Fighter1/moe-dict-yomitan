@@ -37,4 +37,4 @@ Run the **Build and release** workflow from the Actions tab. It builds, validate
 
 Dictionary files from [here (moe)](https://language.moe.gov.tw/001/Upload/Files/site_content/M0001/respub/index.html) and [here (liang'an)](https://github.com/g0v/moedict-data-csld/blob/master/%E5%85%A9%E5%B2%B8%E8%A9%9E%E5%85%B8.xlsx).
 
-`dict/sources.json` records which version of each sheet is in `dict/` and where the build reads it. The weekly **Upstream check** workflow compares it with the two sites and reports newer versions. To update a sheet, replace the file in `dict/` and point `dict/sources.json` at it.
+`dict/sources.json` records which version of each sheet is in `dict/` and where the build reads it. The weekly **Upstream check** workflow compares it with the two sites. When a newer sheet is offered it downloads it into `dict/`, updates `dict/sources.json` and opens a pull request, on which **Build and check** runs. The sheets in `dict/` are the upstream files as they are; corrections to them live in the code. `npm run upstream-check -- --update` does the same replacement locally.

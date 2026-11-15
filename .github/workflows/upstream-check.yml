@@ -1,8 +1,13 @@
 name: Upstream check
 
-# Weekly: compare dict/sources.json with the MOE download pages and the g0v repository. When a
-# newer sheet is offered, open (or refresh) an issue listing it. Downloads nothing and changes no
-# files. If issues are disabled for the repository the run fails instead, so the owner is notified.
+# Weekly: compare dict/sources.json with the MOE download pages and the g0v repository.
+#   - A newer MOE sheet or a changed 兩岸詞典 sheet is downloaded into dict/ and proposed as a
+#     pull request (branch upstream-sources). "Build and check" is started on that branch, so the pull request shows
+#     whether the new sheets build and validate.
+#   - A source that is no longer offered upstream cannot be replaced automatically; it opens or
+#     refreshes an issue.
+# Opening the pull request needs "Allow GitHub Actions to create and approve pull requests"
+# (Settings → Actions → General).
 
 on:
   schedule:
@@ -10,8 +15,10 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
   issues: write
+  actions: write # to start "Build and check" on the branch
 
 concurrency:
   group: upstream-check
@@ -20,39 +27,76 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     defaults:
       run:
         shell: bash
     env:
       GH_TOKEN: ${{ github.token }}
+      BRANCH: upstream-sources
+      ISSUE_TITLE: Upstream sources changed
     steps:
       - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
+          cache: npm
 
-      - name: Compare dict/sources.json with upstream
+      - name: Install
+        run: npm ci
+
+      - name: Compare dict/sources.json with upstream and fetch newer sheets
         id: check
         env:
           GITHUB_TOKEN: ${{ github.token }} # raises the GitHub API rate limit
         run: |
-          node scripts/upstream-check.ts
+          node scripts/upstream-check.ts --update
           cat reports/upstream.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Open or update the issue
-        if: steps.check.outputs.changed == 'true'
+      - name: Open or update the pull request
+        if: steps.check.outputs.updated == 'true'
         run: |
-          title="Upstream sources changed"
-          if [ "$(gh repo view --json hasIssuesEnabled --jq .hasIssuesEnabled)" != "true" ]; then
-            echo "::error::newer source sheets are available (see the job summary); enable issues to get an issue instead of a failed run"
-            exit 1
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git add -A dict
+          # Nothing to do when the branch already proposes exactly these files.
+          if git fetch origin "$BRANCH" 2> /dev/null && git diff --cached --quiet FETCH_HEAD -- dict; then
+            echo "the $BRANCH branch already has these sheets"
+            exit 0
           fi
-          number="$(gh issue list --state open --search "in:title \"$title\"" --json number,title \
-            --jq "[.[] | select(.title == \"$title\")][0].number // empty")"
+          git commit -m "Update the source sheets"
+          git push --force --set-upstream origin "$BRANCH"
+          if [ "$(gh pr list --head "$BRANCH" --state open --json number --jq length)" = "0" ]; then
+            if ! gh pr create --base "${{ github.event.repository.default_branch }}" --head "$BRANCH" \
+              --title "Update the source sheets" --body-file reports/upstream.md; then
+              echo "::error::the $BRANCH branch is pushed, but the pull request could not be opened; allow GitHub Actions to create pull requests (Settings → Actions → General) or open it from the branch"
+              exit 1
+            fi
+          else
+            gh pr edit "$BRANCH" --body-file reports/upstream.md
+          fi
+          # A pull request opened with the workflow token does not start other workflows, so the
+          # build is started here; its result is attached to the branch's commit.
+          gh workflow run ci.yml --ref "$BRANCH"
+
+      - name: Open or update the issue
+        if: steps.check.outputs.manual == 'true'
+        run: |
+          number="$(gh issue list --state open --search "in:title \"$ISSUE_TITLE\"" --json number,title \
+            --jq "[.[] | select(.title == \"$ISSUE_TITLE\")][0].number // empty")"
           if [ -z "$number" ]; then
-            gh issue create --title "$title" --body-file reports/upstream.md
+            gh issue create --title "$ISSUE_TITLE" --body-file reports/upstream.md
           else
             gh issue edit "$number" --body-file reports/upstream.md
+          fi
+
+      - name: Close the issue when everything is current
+        if: steps.check.outputs.newer == 'false' && steps.check.outputs.manual == 'false'
+        run: |
+          number="$(gh issue list --state open --search "in:title \"$ISSUE_TITLE\"" --json number,title \
+            --jq "[.[] | select(.title == \"$ISSUE_TITLE\")][0].number // empty")"
+          if [ -n "$number" ]; then
+            gh issue close "$number" --comment "The sources in \`dict/sources.json\` are current again."
           fi

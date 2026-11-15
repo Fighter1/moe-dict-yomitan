@@ -1,6 +1,6 @@
 import { Dictionary, TermEntry } from "yomichan-dict-builder";
 import { readdirSync, readFileSync } from "fs";
-import { read, utils } from "xlsx";
+import { read, utils, type WorkSheet } from "xlsx";
 import { OpenCC } from "opencc";
 import type {
   StructuredContent,
@@ -39,7 +39,41 @@ export async function addFilesConcised(
   });
 }
 
-type AltReadingType = "變" | "又音" | "語音" | "讀音";
+const ALT_READING_TYPES = ["變", "又音", "語音", "讀音", "或讀"] as const;
+type AltReadingType = (typeof ALT_READING_TYPES)[number];
+
+// The sheets are read by column title, so a column MOE renames would silently empty a field.
+const REQUIRED_COLUMNS = [
+  "字詞名",
+  "字詞號",
+  "多音排序",
+  "注音一式",
+  "變體注音",
+  "漢語拼音",
+  "變體漢語拼音",
+  "釋義",
+  "相似詞",
+  "相反詞",
+];
+
+/**
+ * Checks the column titles of a sheet (its first row) and returns the title of the 變體類型
+ * column, which lists its values and grows with them ("變體類型 1:變 2:又音 3:語音 4:讀音 5:或讀").
+ */
+function altReadingTypeColumn(sheet: WorkSheet, path: string): string {
+  const range = utils.decode_range(sheet["!ref"]!);
+  const titles: string[] = [];
+  for (let c = range.s.c; c <= range.e.c; c++)
+    titles.push(String(sheet[utils.encode_cell({ r: range.s.r, c })]?.v ?? "").trim());
+  const column = titles.find((title) => title.startsWith("變體類型"));
+  const missing = REQUIRED_COLUMNS.filter((title) => !titles.includes(title));
+  if (!column) missing.push("變體類型 …");
+  if (missing.length)
+    throw new Error(
+      `${path} has no column ${missing.join(", ")}; its columns are: ${titles.join(" | ")}`,
+    );
+  return column!;
+}
 
 /**
  * The alternative-reading block. Both reading systems are emitted (tagged `reading-tag`) so the
@@ -50,7 +84,7 @@ function getAltReadingContent(
   readings: SystemReadings,
 ): StructuredContentNode {
   const type = altReadingType as AltReadingType;
-  if (!["變", "又音", "語音", "讀音"].includes(type)) return "";
+  if (!ALT_READING_TYPES.includes(type)) return "";
   const present = hasReading(readings);
   if (type === "變" && !present) return "";
   const label: StructuredContentNode = {
@@ -264,6 +298,10 @@ export async function addTermsMoe(
   const sheetRevised = workbookRevised.Sheets[workbookRevised.SheetNames[0]!]!;
   const sheetConcisedPicsIndex =
     workbookConcisedPicsIndex.Sheets[workbookConcisedPicsIndex.SheetNames[0]!]!;
+  const altReadingTypeColumns = [
+    altReadingTypeColumn(sheetConcised, concisedPath),
+    altReadingTypeColumn(sheetRevised, revisedPath),
+  ];
   const dataConcised = utils.sheet_to_json(sheetConcised) as MoeEntry[];
   const dataRevised = utils.sheet_to_json(sheetRevised) as MoeEntry[];
   const dataConcisedPicsIndex = (
@@ -327,8 +365,8 @@ export async function addTermsMoe(
         相似詞: synonyms,
         相反詞: antonyms,
         多音排序: order,
-        "變體類型 1:變 2:又音 3:語音 4:讀音": altReadingType,
       } = entry;
+      const altReadingType = entry[altReadingTypeColumns[i]!] ?? "";
       const simplifiedTerm = simplifiedConverter.convertSync(term);
       const termsParent: StructuredContentNode = {
         tag: "span",

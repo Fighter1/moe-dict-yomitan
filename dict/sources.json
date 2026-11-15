@@ -1,19 +1,19 @@
 {
   "concised": {
     "upstream": "dict_concised_2014",
-    "version": "20250925",
-    "path": "dict/dict_concised_2014_20250925.xlsx"
+    "version": "20260929",
+    "path": "dict/dict_concised_2014_20260929.xlsx"
   },
   "concisedPics": {
     "upstream": "dict_concised_pic_2014",
-    "version": "20250925",
-    "path": "dict/dict_concised_pic_2014_20250925",
-    "index": "dict/dict_concised_pic_2014_20250925.xlsx"
+    "version": "20260929",
+    "path": "dict/dict_concised_pic_2014_20260929",
+    "index": "dict/dict_concised_pic_2014_20260929.xlsx"
   },
   "revised": {
     "upstream": "dict_revised_2015",
-    "version": "20251229",
-    "path": "dict/dict_revised_2015_20251229.xlsx"
+    "version": "20260929",
+    "path": "dict/dict_revised_2015_20260929.xlsx"
   },
   "liangan": {
     "repo": "g0v/moedict-data-csld",

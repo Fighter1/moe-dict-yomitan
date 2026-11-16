@@ -3,6 +3,9 @@ name: Build and release
 # Manual: build the six dictionaries, validate them and publish them as the latest GitHub release,
 # so Yomitan's "Check for updates" picks them up. The revision in every index.json and the release
 # tag are the same value: UTC date + run number unless one is given.
+#
+# Two jobs: "build" runs the project's code and its dependencies with a read-only token; only
+# "publish", which runs nothing but gh, can write to the repository.
 
 on:
   workflow_dispatch:
@@ -16,31 +19,62 @@ on:
         type: string
         default: ""
 
-permissions:
-  contents: write
-
 concurrency:
   group: release
   cancel-in-progress: false
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      revision: ${{ steps.revision.outputs.revision }}
     defaults:
       run:
         # Naming the shell makes Actions run it as `bash -eo pipefail`.
         shell: bash
-    env:
-      GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Releases are published from the default branch
-        if: ${{ inputs.publish && github.ref_name != github.event.repository.default_branch }}
-        run: |
-          echo "::error::run this workflow on ${{ github.event.repository.default_branch }}, or turn 'publish' off for a build-only run"
-          exit 1
-
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Choose the revision
+        id: revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Passed through the environment, never pasted into the script text.
+          INPUT_REVISION: ${{ inputs.revision }}
+          PUBLISH: ${{ inputs.publish }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          rev="$INPUT_REVISION"
+          [ -n "$rev" ] || rev="$(date -u +%Y.%m.%d).$RUN_NUMBER"
+          if ! [[ "$rev" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]+$ ]]; then
+            echo "::error::revision '$rev' must be four dot-separated integers, e.g. 2026.11.15.7"
+            exit 1
+          fi
+          if [ "$PUBLISH" = "true" ]; then
+            if [ "$GITHUB_REF_NAME" != "$DEFAULT_BRANCH" ]; then
+              echo "::error::run this workflow on $DEFAULT_BRANCH, or turn 'publish' off for a build-only run"
+              exit 1
+            fi
+            # A re-run of an old run builds its old commit but would get today's date.
+            head="$(git ls-remote origin "refs/heads/$GITHUB_REF_NAME" | cut -f1)"
+            if [ "$head" != "$GITHUB_SHA" ]; then
+              echo "::error::$GITHUB_SHA is no longer the head of $GITHUB_REF_NAME (a re-run of an old run?); start a new run"
+              exit 1
+            fi
+            if gh release view "v$rev" > /dev/null 2>&1 || git ls-remote --exit-code --tags origin "refs/tags/v$rev" > /dev/null; then
+              echo "::error::v$rev already exists"
+              exit 1
+            fi
+          fi
+          echo "revision=$rev" >> "$GITHUB_OUTPUT"
+          echo "REVISION=$rev" >> "$GITHUB_ENV"
+          echo "revision $rev"
 
       - uses: actions/setup-node@v7
         with:
@@ -50,53 +84,57 @@ jobs:
       - name: Install
         run: npm ci
 
-      - name: Choose the revision
-        env:
-          # Passed through the environment, never pasted into the script text.
-          INPUT_REVISION: ${{ inputs.revision }}
-          RUN_NUMBER: ${{ github.run_number }}
-        run: |
-          rev="$INPUT_REVISION"
-          [ -n "$rev" ] || rev="$(date -u +%Y.%m.%d).$RUN_NUMBER"
-          if ! [[ "$rev" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]+$ ]]; then
-            echo "::error::revision '$rev' must be four dot-separated integers, e.g. 2026.11.15.7"
-            exit 1
-          fi
-          if gh release view "v$rev" > /dev/null 2>&1; then
-            echo "::error::release v$rev already exists"
-            exit 1
-          fi
-          echo "REVISION=$rev" >> "$GITHUB_ENV"
-          echo "revision $rev"
-
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Test
+        run: npm test
+
       - name: Build
+        # export.ts reads REVISION and GITHUB_REPOSITORY from the environment.
         run: npm run build
 
-      - name: Validate
-        run: node scripts/validate.ts --revision "$REVISION"
-
-      - name: Write the release notes
+      - name: Validate and write the release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh release view --json tagName,body > "$RUNNER_TEMP/previous.json" 2> /dev/null || echo '{}' > "$RUNNER_TEMP/previous.json"
+          # Yomitan only offers a revision that is newer than the installed one.
+          latest="$(jq -r '.tagName // empty' "$RUNNER_TEMP/previous.json")"
+          node scripts/validate.ts --revision "$REVISION" ${latest:+--after "$latest"}
           node scripts/release-notes.ts --previous "$RUNNER_TEMP/previous.json"
           cat reports/release-notes.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload the zips as an artifact (build-only run)
-        if: ${{ !inputs.publish }}
+      - name: Upload the zips
         uses: actions/upload-artifact@v7
         with:
-          name: dictionaries-${{ env.REVISION }}
+          name: dictionaries-${{ steps.revision.outputs.revision }}
           retention-days: 7
+          compression-level: 0 # they are zips already
+          if-no-files-found: error
           path: |
             build/*.zip
             build/index-*.json
             reports/release-notes.md
 
+  publish:
+    needs: build
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download the zips
+        uses: actions/download-artifact@v8
+        with:
+          name: dictionaries-${{ needs.build.outputs.revision }}
+
       - name: Publish the release
-        if: ${{ inputs.publish }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REVISION: ${{ needs.build.outputs.revision }}
         # --target: without it gh tags the branch head at publish time, which is not the built
         # commit when something was pushed during the build.
         run: |

@@ -1,49 +1,21 @@
-import { readFileSync } from "fs";
-import { read, utils, type WorkSheet } from "xlsx";
-import { Dictionary, TermEntry } from "yomichan-dict-builder";
-import parse_html from "./parse_html.ts";
-import type {
-  StructuredContent,
-  StructuredContentNode,
-} from "yomichan-dict-builder/dist/types/yomitan/termbank";
-import { parsePinyin, unresolvedPinyin } from "./utils.ts";
+// 兩岸詞典: dict/liangancidian.xlsx, the sheet published in g0v/moedict-data-csld as it is.
+import {
+  addEntry,
+  div,
+  labelled,
+  readSheet,
+  span,
+  termsParent,
+  type Editions,
+  type Row,
+  type StructuredContent,
+  type StructuredContentNode,
+} from "./content.ts";
+import { buildNotes } from "./notes.ts";
+import { htmlToContent, inlineHtml } from "./parse_html.ts";
+import { toneMismatches, zhuyinReading, zhuyinToPinyin } from "./pinyin.ts";
 import { hasReading, readingSpans, type SystemReadings } from "./readings.ts";
-
-const someLiangAnEntry = {
-  稿件版本: "1",
-  稿件階段: "終定稿",
-  稿件狀態: "",
-  備注: "",
-  字詞流水序: "1000010119",
-  正體字形: "一石兩鳥",
-  簡化字形: "一石两鸟",
-  音序: "",
-  "臺／陸特有詞": "",
-  "臺／陸特有音": "",
-  臺灣音讀: "丨ˋ　ㄕˊ　ㄌ丨ㄤˇ　ㄋ丨ㄠˇ",
-  臺灣漢拼: "yìshí-liǎnɡniǎo",
-  大陸音讀: "丨　ㄕˊ　ㄌ丨ㄤˇ　ㄋ丨ㄠˇ",
-  大陸漢拼: "yīshí-liǎnɡniǎo",
-};
-type NumericRange<
-  START extends number,
-  END extends number,
-  ARR extends unknown[] = [],
-  ACC extends number = never
-> = ARR["length"] extends END
-  ? ACC | START | END
-  : NumericRange<
-      START,
-      END,
-      [...ARR, 1],
-      ARR[START] extends undefined ? ACC : ACC | ARR["length"]
-    >;
-type Meanings = `釋義${NumericRange<1, 30>}`;
-
-type LiangAnEntry = Record<string, string | undefined> &
-  typeof someLiangAnEntry & {
-    [K in Meanings]?: string;
-  };
+import { parsePinyin } from "./utils.ts";
 
 // Pinyin cells that are truncated or garbled in the sheet itself. The zhuyin cell of the same row is intact,
 // so they are corrected from it. (All of them show up in the "disagree with the zhuyin cell" report of the build.)
@@ -68,7 +40,6 @@ const DEFINITION_FIXES: Record<string, [string, string]> = {
   ],
 };
 
-// The sheet is read by column title, so a renamed column would silently empty a field.
 const REQUIRED_COLUMNS = [
   "正體字形",
   "簡化字形",
@@ -81,288 +52,147 @@ const REQUIRED_COLUMNS = [
   "大陸漢拼",
   "釋義1",
 ];
+const MAX_DEFINITIONS = 30; // 釋義1 … 釋義30
+
+/** The sheet numbers its definition columns with full-width digits (釋義１ … 釋義３０). */
+const asciiDigits = (title: string) =>
+  title.replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xfee0));
+
+// 簡化字形 cells nobody can look up: a character described by its parts ("并（艹+带）"), or one
+// that only exists as a private-use glyph.
+const NOT_A_HEADWORD = /[（(].*[+＋].*[)）]|[\uE000-\uF8FF]/u;
 
 /**
- * The sheet numbers its definition columns with full-width digits (釋義１ … 釋義３０); the titles
- * are rewritten with ASCII digits in place, and the columns this file reads are checked.
+ * The lines of a definition cell. A few cells hold several lines: a heading with the first of
+ * its numbered items (三吳), a list of examples (破折號). A line break in the middle of a
+ * sentence (月牙泉) is not a new line.
  */
-function normalizeColumnTitles(sheet: WorkSheet, path: string) {
-  const range = utils.decode_range(sheet["!ref"]!);
-  const titles: string[] = [];
-  for (let c = range.s.c; c <= range.e.c; c++) {
-    const cell = sheet[utils.encode_cell({ r: range.s.r, c })];
-    if (!cell) continue;
-    const title = String(cell.v ?? "")
-      .trim()
-      .replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xfee0));
-    cell.v = title;
-    delete cell.w; // the cached display text, which sheet_to_json would use instead
-    titles.push(title);
-  }
-  const missing = REQUIRED_COLUMNS.filter((title) => !titles.includes(title));
-  if (missing.length)
-    throw new Error(
-      `${path} has no column ${missing.join(", ")}; its columns are: ${titles.join(" | ")}`,
-    );
+export function definitionLines(cell: string): string[] {
+  const lines: string[] = [];
+  for (const line of cell.split(/\r?\n/).map((l) => l.trim()).filter(Boolean))
+    if (lines.length && !/[。：；！？」』）)]$/.test(lines.at(-1)!)) lines[lines.length - 1] += line;
+    else lines.push(line);
+  return lines;
 }
 
-function getContent(contentRow: string, term: string): StructuredContentNode {
+/** One line of a definition: its text, a note after ∥, and the examples after each [例]. */
+export function getContent(line: string, term: string): StructuredContentNode {
   let note: StructuredContentNode = "";
-  const noteMatch = contentRow.match(/[∥‖](.*)$/);
+  const noteMatch = line.match(/[∥‖](.*)$/);
   if (noteMatch) {
-    const [fullMatch, content] = noteMatch;
-    note = {
-      tag: "span",
-      content,
-      data: { moedict: "definition-entry-note" },
-    };
-    contentRow = contentRow.replace(fullMatch, "").trim();
+    note = span("definition-entry-note", inlineHtml(noteMatch[1]!));
+    line = line.replace(noteMatch[0], "").trim();
   }
-  let content: StructuredContentNode =
-    contentRow.match(/(^.*?(?=(\[例\])))|(^.*(?!(\[例\])))/g)?.at(0) ?? "";
-  const pos = contentRow.match(/^\d\..*(?=：$)/g);
-  if (pos && pos.length === 1) {
-    const [posLabel] = pos;
-    content = [
-      {
-        tag: "span",
-        content: [posLabel, { tag: "br" }],
-        data: { moedict: "pos-label" },
-      },
-    ] satisfies StructuredContentNode;
-  }
-  const example = contentRow.match(/(?<=\[例\]).*/g)?.at(0);
-  return {
-    tag: "div",
-    content: [
-      {
-        tag: "span",
-        content: content,
-        data: { moedict: "definition-entry-content" },
-      },
-      note,
-      example
-        ? {
-            tag: "span",
-            content: [
-              {
-                tag: "span",
-                content: "例",
-                data: { moedict: "definition-entry-example-label" },
-              },
-              {
-                tag: "span",
-                content: example.replace(/[〜～]/g, term),
-                data: { moedict: "definition-entry-example-content" },
-              },
-            ],
-            data: { moedict: "definition-entry-example-parent" },
-          }
-        : "",
-    ],
-    data: { moedict: "definition-entry" },
-  };
+  // "[例]" starts an example; a few cells have it twice, repeat the example or lost the "]"
+  const [text = "", ...rest] = line.split(/\[例\]?/);
+  const examples = [...new Set(rest.map((example) => example.trim()).filter(Boolean))];
+  // "3.量詞：" heads the definitions that follow it
+  const heading = /^\d+\..*：$/.test(text.trim());
+  return div("definition-entry", [
+    span("definition-entry-content", heading ? [span("pos-label", [text.trim().slice(0, -1), { tag: "br" }])] : inlineHtml(text)),
+    note,
+    ...examples.map((example) =>
+      labelled("definition-entry-example", "例", [
+        span("definition-entry-example-content", inlineHtml(example.replace(/[〜～]/g, term))),
+      ]),
+    ),
+  ]);
 }
 
 function getAdditionalInfo(
   mainlandReading?: SystemReadings,
   taiwanOrChinaTerm?: string,
-  taiwanOrChinaReading?: string
+  taiwanOrChinaReading?: string,
 ): StructuredContentNode[] {
-  const info = [] as StructuredContentNode[];
-  hasReading(mainlandReading) &&
-    info.push({
-      tag: "span",
-      content: [
-        {
-          tag: "span",
-          content: "大陸音讀",
-          data: { moedict: "mainland-reading-label" },
-        },
-        ...readingSpans(mainlandReading, "mainland-reading-content"),
-      ],
-      data: { moedict: "mainland-reading-parent", altReadingType: "大陸音讀" },
-    });
-  taiwanOrChinaTerm &&
-    info.push({
-      tag: "span",
-      content: [
-        {
-          tag: "span",
-          content: `詞`,
-          data: { moedict: "word-belong-label" },
-        },
-        {
-          tag: "span",
-          content: taiwanOrChinaTerm,
-          data: { moedict: "word-belong-content" },
-        },
-      ],
-      data: { moedict: "word-belong-parent" },
-    });
-  taiwanOrChinaReading &&
-    info.push({
-      tag: "span",
-      content: [
-        {
-          tag: "span",
-          content: `音`,
-          data: { moedict: "sound-belong-label" },
-        },
-        {
-          tag: "span",
-          content: taiwanOrChinaReading,
-          data: { moedict: "sound-belong-content" },
-        },
-      ],
-      data: { moedict: "sound-belong-parent" },
-    });
+  const info: StructuredContentNode[] = [];
+  if (hasReading(mainlandReading))
+    info.push(
+      labelled("mainland-reading", "大陸音讀", readingSpans(mainlandReading, "mainland-reading-content"), {
+        data: { altReadingType: "大陸音讀" },
+      }),
+    );
+  if (taiwanOrChinaTerm) info.push(labelled("word-belong", "詞", [span("word-belong-content", taiwanOrChinaTerm)]));
+  if (taiwanOrChinaReading)
+    info.push(labelled("sound-belong", "音", [span("sound-belong-content", taiwanOrChinaReading)]));
   return info;
 }
 
-export async function addTermsLiangAn(
-  [liangAnDicZhuyin, liangAnDicPinyin]: [Dictionary, Dictionary],
-  path: string,
-  popularityBoost = 100
-) {
-  const fbLiangAn = readFileSync(path);
-  const workbookLiangAn = read(fbLiangAn);
-  const sheetLiangAn = workbookLiangAn.Sheets[workbookLiangAn.SheetNames[0]!]!;
-  normalizeColumnTitles(sheetLiangAn, path);
-  const dataLiangAn = utils.sheet_to_json(sheetLiangAn) as LiangAnEntry[];
+/** Adds every entry of the sheet to the two editions of the dictionary. */
+export async function addTermsLiangAn(editions: Editions, path: string, popularityBoost = 100) {
+  const { rows } = readSheet(path, REQUIRED_COLUMNS, asciiDigits);
+  // every cell: script ɡ (U+0261) to g, trimmed
+  const text = (row: Row, title: string) =>
+    row[title] === undefined ? undefined : String(row[title]).replaceAll("ɡ", "g").trim();
 
-  let b = 0;
-  // One sequence number per source entry, shared by its traditional/simplified rows and
-  // identical in both editions, so that consumers can group the rows back together.
   let sequence = 0;
-  for (const entry of dataLiangAn) {
-    // The zhuyin cells still have their per-syllable spacing at this point (the loop below strips it for the
-    // zhuyin edition's readings); parsePinyin uses that spacing to check where the joined pinyin has to be cut.
-    const zhuyinAsTyped = { 臺灣漢拼: entry.臺灣音讀, 大陸漢拼: entry.大陸音讀 };
-    // preprocess a little bit
-    for (const key in entry) {
-      if (typeof entry[key] === "string") {
-        entry[key] = entry[key].replaceAll("ɡ", "g").trim();
-      }
-      // some keys have "丨" in them (supposed to be used in vertical text, but we use horizontal text)
-      if (["臺灣音讀", "大陸音讀"].includes(key) || key.startsWith("釋義")) {
-        entry[key] = (entry[key] ?? "").replaceAll("丨", "ㄧ");
-        if (["臺灣音讀", "大陸音讀"].includes(key))
-          entry[key] = entry[key].replace(/[ 　，]/g, "") ?? "";
-        else {
-          const fix = DEFINITION_FIXES[entry.正體字形];
-          if (fix) entry[key] = entry[key].replace(fix[0], fix[1]);
-        }
-      } else if (key === "臺灣漢拼" || key === "大陸漢拼") {
-        const cell = entry[key] ?? "";
-        entry[key] = parsePinyin(PINYIN_TYPOS[cell] ?? cell, zhuyinAsTyped[key]);
-      }
-    }
+  for (const row of rows) {
+    const termTrad = text(row, "正體字形") ?? "";
 
-    const {
-      正體字形: termTrad,
-      簡化字形: termSimpl,
-      臺灣音讀: zhuyinReading,
-      臺灣漢拼: pinyinReading,
-      大陸音讀: mZhuyinReading,
-      大陸漢拼: mPinyinReading,
-      // star is Mainland, triangle is Taiwan
-      "臺／陸特有詞": taiwanOrChinaTerm,
-      "臺／陸特有音": taiwanOrChinaReading,
-      音序: order,
-    } = entry;
-    // the sheet leaves 簡化字形 empty when it equals 正體字形
-    const hasDistinctSimplified = !!termSimpl && termTrad !== termSimpl;
-    const termsParent: StructuredContentNode = {
-      tag: "span",
-      content: [],
-      data: { moedict: "terms-parent" },
-    };
-    (termsParent.content as StructuredContentNode[]).push({
-      tag: "span",
-      content: `${termTrad}`,
-      data: { moedict: "traditional-term" },
-    });
-    if (hasDistinctSimplified)
-      (termsParent.content as StructuredContentNode[]).push({
-        tag: "span",
-        content: `${termSimpl}`,
-        data: { moedict: "simplified-term" },
-        lang: "zh-CN",
-      });
-    const meaningsParent = {
-      tag: "div",
-      content: [] as StructuredContentNode[],
-      data: { moedict: "meanings-parent" },
-    } satisfies StructuredContentNode;
-    for (let i = 1; i <= 30; i++) {
-      const meaning = entry[`釋義${i}`] as string | undefined;
-      if (meaning) {
-        meaning.includes("<table")
-          ? meaningsParent.content.push(parse_html(meaning))
-          : meaningsParent.content.push(getContent(meaning, termTrad));
-      } else {
-        break;
+    // One reading (臺灣 or 大陸) in both systems. The zhuyin cell as typed still has its
+    // per-syllable spacing, which parsePinyin uses to check where the joined pinyin has to be cut.
+    const reading = (zhuyinTitle: string, pinyinTitle: string, where: string): SystemReadings => {
+      const zhuyinCell = text(row, zhuyinTitle);
+      const pinyinCell = text(row, pinyinTitle);
+      let pinyin = pinyinCell && parsePinyin(PINYIN_TYPOS[pinyinCell] ?? pinyinCell, zhuyinCell);
+      if (zhuyinCell && !pinyin) {
+        // the pinyin cell is empty (憱)
+        pinyin = zhuyinToPinyin(zhuyinCell);
+        if (pinyin) buildNotes.pinyinFromZhuyin.push(`${termTrad}${where}: (empty) → ${pinyin}`);
+      } else if (zhuyinCell && pinyin) {
+        const tones = toneMismatches(pinyin, zhuyinCell);
+        if (tones.length) buildNotes.toneMismatches.push(`${termTrad}${where}: ${tones.join(", ")}`);
       }
-    }
+      return { zhuyin: zhuyinCell ? zhuyinReading(zhuyinCell) : undefined, pinyin: pinyin || undefined };
+    };
+    const taiwan = reading("臺灣音讀", "臺灣漢拼", "");
+    const mainland = reading("大陸音讀", "大陸漢拼", " (大陸)");
+    // A pronunciation that only the mainland has (嗎 má) leaves the 臺灣 cells empty.
+    const main = hasReading(taiwan) ? taiwan : mainland;
     // The mainland reading block is shown when it differs in either system, and then carries
     // both systems, so the content is identical in the zhuyin and pinyin editions.
     const mainlandDiffers =
-      (!!mZhuyinReading && mZhuyinReading !== zhuyinReading) ||
-      (!!mPinyinReading && mPinyinReading !== pinyinReading);
+      (!!mainland.zhuyin && mainland.zhuyin !== main.zhuyin) || (!!mainland.pinyin && mainland.pinyin !== main.pinyin);
+
+    // the sheet leaves 簡化字形 empty when it equals 正體字形, and writes 兒 as ㄦ in three erhua words
+    const simplified = text(row, "簡化字形")?.replaceAll("ㄦ", "儿");
+
+    const definitions: StructuredContentNode[] = [];
+    for (let i = 1; i <= MAX_DEFINITIONS; i++) {
+      let definition = text(row, `釋義${i}`)?.replaceAll("丨", "ㄧ"); // ㄧ as typed for vertical text
+      if (!definition) break;
+      const fix = DEFINITION_FIXES[termTrad];
+      if (fix) definition = definition.replace(fix[0], fix[1]);
+      if (definition.includes("<table")) definitions.push(div("meaning-parent", htmlToContent(definition)));
+      else for (const line of definitionLines(definition)) definitions.push(getContent(line, termTrad));
+    }
+
     const content: StructuredContent = [
-      {
-        tag: "span",
-        content: [
-          termsParent,
-          getAdditionalInfo(
-            mainlandDiffers
-              ? { zhuyin: mZhuyinReading, pinyin: mPinyinReading }
-              : undefined,
-            taiwanOrChinaTerm,
-            taiwanOrChinaReading
-          ),
-        ],
-        data: { moedict: "first-row-parent" },
-      },
-      meaningsParent,
+      span("first-row-parent", [
+        termsParent(termTrad, simplified),
+        ...getAdditionalInfo(
+          mainlandDiffers ? mainland : undefined,
+          // star is Mainland, triangle is Taiwan
+          text(row, "臺／陸特有詞"),
+          text(row, "臺／陸特有音"),
+        ),
+      ]),
+      div("meanings-parent", definitions),
     ];
-    const entrySequence = ++sequence;
-    const zhuyinTermEntry = new TermEntry(termTrad)
-      .setReading(zhuyinReading)
-      .setSequenceNumber(entrySequence)
-      .setPopularity(order ? -parseInt(order) + popularityBoost : 0)
-      .addDetailedDefinition({
-        type: "structured-content",
-        content: { tag: "span", content, lang: "zh-TW" },
-      });
-    const pinyinTermEntry = new TermEntry(termTrad)
-      .setReading(pinyinReading ?? "")
-      .setSequenceNumber(entrySequence)
-      .setPopularity(order ? -parseInt(order) + popularityBoost : 0)
-      .addDetailedDefinition({
-        type: "structured-content",
-        content: { tag: "span", content, lang: "zh-TW" },
-      });
-    await Promise.all([
-      liangAnDicZhuyin.addTerm(zhuyinTermEntry.build()),
-      liangAnDicPinyin.addTerm(pinyinTermEntry.build()),
-    ]);
-    if (hasDistinctSimplified) {
-      zhuyinTermEntry.setTerm(termSimpl);
-      pinyinTermEntry.setTerm(termSimpl);
-      await Promise.all([
-        liangAnDicZhuyin.addTerm(zhuyinTermEntry.build()),
-        liangAnDicPinyin.addTerm(pinyinTermEntry.build()),
-      ]);
-    }
-    if (++b % 10000 === 0) {
-      console.log(`Processed ${b} entries`);
-    }
+    await addEntry(editions, {
+      term: termTrad,
+      simplified: simplified && !NOT_A_HEADWORD.test(simplified) ? simplified : undefined,
+      zhuyin: main.zhuyin ?? "",
+      pinyin: main.pinyin ?? "",
+      sequence: ++sequence,
+      // 音序 is empty for a headword with one reading and "1.", "2.", … for the readings of one with several
+      score: popularityBoost - (parseInt(text(row, "音序") ?? "") || 0),
+      content,
+    });
+    if (sequence % 10000 === 0) console.log(`Processed ${sequence} entries`);
   }
-  if (unresolvedPinyin.length)
+  if (buildNotes.unresolvedPinyin.length)
     console.log(
-      `${unresolvedPinyin.length} pinyin cells disagree with the zhuyin cell of their row (typos in the sheet):\n  ` +
-        unresolvedPinyin.join("\n  ")
+      `${buildNotes.unresolvedPinyin.length} pinyin cells disagree with the zhuyin cell of their row (typos in the sheet):\n  ` +
+        buildNotes.unresolvedPinyin.join("\n  "),
     );
 }

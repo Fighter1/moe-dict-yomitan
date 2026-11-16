@@ -47,21 +47,48 @@ const ZHUYIN_FINALS: Record<string, string> = {
   ㄚ: "a", ㄛ: "o", ㄜ: "e", ㄝ: "ê", ㄞ: "ai", ㄟ: "ei", ㄠ: "ao", ㄡ: "ou", ㄢ: "an", ㄣ: "en", ㄤ: "ang", ㄥ: "eng", ㄦ: "er",
 };
 // spelling of medial + final, without an initial (yi, wu, yu ...) and after one (-i-, -u-, -ü-)
+// The e and (for ㄩ) a rows are not standard syllables; the sheets write erhua that way:
+// ㄏㄨㄜˇㄦ huěr (會兒), ㄨㄜˋㄦ wèr (味兒), ㄩㄚˊㄦ yuár (圓兒).
 const NO_INITIAL: Record<string, Record<string, string>> = {
-  ㄧ: { "": "yi", a: "ya", o: "yo", ê: "ye", ai: "yai", ao: "yao", ou: "you", an: "yan", en: "yin", ang: "yang", eng: "ying" },
-  ㄨ: { "": "wu", a: "wa", o: "wo", ai: "wai", ei: "wei", an: "wan", en: "wen", ang: "wang", eng: "weng" },
-  ㄩ: { "": "yu", ê: "yue", an: "yuan", en: "yun", eng: "yong" },
+  ㄧ: { "": "yi", a: "ya", o: "yo", e: "ye", ê: "ye", ai: "yai", ao: "yao", ou: "you", an: "yan", en: "yin", ang: "yang", eng: "ying" },
+  ㄨ: { "": "wu", a: "wa", o: "wo", e: "we", ai: "wai", ei: "wei", an: "wan", en: "wen", ang: "wang", eng: "weng" },
+  ㄩ: { "": "yu", a: "yua", e: "yue", ê: "yue", an: "yuan", en: "yun", eng: "yong" },
 };
 const AFTER_INITIAL: Record<string, Record<string, string>> = {
-  ㄧ: { "": "i", a: "ia", o: "io", ê: "ie", ai: "iai", ao: "iao", ou: "iu", an: "ian", en: "in", ang: "iang", eng: "ing" },
-  ㄨ: { "": "u", a: "ua", o: "uo", ai: "uai", ei: "ui", an: "uan", en: "un", ang: "uang", eng: "ong" },
-  ㄩ: { "": "ü", ê: "üe", an: "üan", en: "ün", eng: "iong" },
+  ㄧ: { "": "i", a: "ia", o: "io", e: "ie", ê: "ie", ai: "iai", ao: "iao", ou: "iu", an: "ian", en: "in", ang: "iang", eng: "ing" },
+  ㄨ: { "": "u", a: "ua", o: "uo", e: "ue", ai: "uai", ei: "ui", an: "uan", en: "un", ang: "uang", eng: "ong" },
+  ㄩ: { "": "ü", a: "üa", e: "üe", ê: "üe", an: "üan", en: "ün", eng: "iong" },
 };
-const ZHUYIN_VARIANTS: Record<string, string> = { "丨": "ㄧ", "｜": "ㄧ", "〡": "ㄧ" };
+// The sheets type ㄧ as a vertical bar (it is one in vertical text) and a few tone marks as lookalikes.
+const ZHUYIN_VARIANTS: Record<string, string> = {
+  "丨": "ㄧ", "｜": "ㄧ", "〡": "ㄧ",
+  "‵": "ˋ", "′": "ˊ",
+  "‧": "˙", "·": "˙", "•": "˙",
+};
+const ZHUYIN_SEPARATORS = /[\s，,﹐、；;。]+/gu;
+
+/** A zhuyin cell with the variant characters replaced and private-use glyphs removed; spacing is kept. */
+export const normalizeZhuyin = (raw: string) =>
+  [...raw].map((c) => ZHUYIN_VARIANTS[c] ?? c).join("").replace(/[\uE000-\uF8FF]/gu, "");
+
+/** A zhuyin cell as a reading: normalised and without the spacing between syllables. */
+export const zhuyinReading = (raw: string) => normalizeZhuyin(raw).replace(ZHUYIN_SEPARATORS, "");
+
+/** The syllables of a zhuyin cell that has its per-syllable spacing. */
+const splitZhuyin = (zhuyin: string) => normalizeZhuyin(zhuyin).split(ZHUYIN_SEPARATORS).filter(Boolean);
+
+export type Tone = 0 | 1 | 2 | 3 | 4;
+const ZHUYIN_TONES: Record<string, Tone> = { "˙": 0, "ˊ": 2, "ˇ": 3, "ˋ": 4 };
+
+/** The tone of a zhuyin syllable: the first tone has no mark, the neutral tone a dot. */
+function zhuyinTone(syllable: string): Tone {
+  for (const c of syllable) if (c in ZHUYIN_TONES) return ZHUYIN_TONES[c]!;
+  return 1;
+}
 
 /** One zhuyin syllable -> toneless pinyin ("huar" style for erhua), or undefined if it is not standard zhuyin. */
 function zhuyinSyllableToPinyin(syllable: string): string | undefined {
-  let z = [...syllable].map((c) => ZHUYIN_VARIANTS[c] ?? c).join("").replace(/[ˊˇˋ˙‵′•‧·]/gu, "");
+  let z = normalizeZhuyin(syllable).replace(/[ˊˇˋ˙]/gu, "");
   let erhua = "";
   if (z.length > 1 && z.endsWith("ㄦ")) {
     erhua = "r";
@@ -100,29 +127,71 @@ function zhuyinSyllableToPinyin(syllable: string): string | undefined {
 
 /** Expected toneless syllables; an entry is undefined where the zhuyin is non-standard (ㄏㄨㄜˇㄦ ...). */
 function zhuyinToSyllables(zhuyin: string): (string | undefined)[] {
-  return zhuyin
-    .replace(/[\uE000-\uF8FF]/gu, "") // private-use glyphs left over in a few cells
-    .split(/[\s，,﹐、；;。]+/u)
-    .filter(Boolean)
-    .map(zhuyinSyllableToPinyin);
+  return splitZhuyin(zhuyin).map(zhuyinSyllableToPinyin);
 }
 
 // ---------------------------------------------------------------------------------------------
 
-/** Moves a tone mark that sits on the wrong vowel (the sheet has "shìdɑì", "toú", "hùi", "ɡǔo"). */
-function fixToneMarkPlacement(syllable: string): string {
-  const marked = [...syllable].filter((c) => TONED_TO_BASE.has(c));
-  if (marked.length !== 1) return syllable;
-  const tone = TONED_TO_BASE.get(marked[0]!)![1];
-  const base = [...syllable].map((c) => TONED_TO_BASE.get(c)?.[0] ?? c);
-  const plain = base.join("");
+/** A toneless syllable with the mark of `tone` on the vowel that carries it. */
+function withToneMark(plain: string, tone: Tone): string {
+  if (tone === 0) return plain;
+  const letters = [...plain];
   // a and e always take the mark, then the o of "ou", otherwise the last vowel
   let at = plain.search(/[ae]/u);
   if (at < 0) at = plain.indexOf("ou");
   if (at < 0) at = Math.max(...[..."iouü"].map((v) => plain.lastIndexOf(v)));
-  if (at < 0) return syllable;
-  base[at] = TONE_MARKS[base[at]!]![tone - 1]!;
-  return base.join("");
+  if (at < 0) return plain;
+  letters[at] = TONE_MARKS[letters[at]!]![tone - 1]!;
+  return letters.join("");
+}
+
+/** The tone a pinyin syllable is marked with (0: no mark), or undefined when it has several marks. */
+export function pinyinTone(syllable: string): Tone | undefined {
+  const marked = [...syllable].filter((c) => TONED_TO_BASE.has(c));
+  if (marked.length > 1) return undefined;
+  return marked.length ? (TONED_TO_BASE.get(marked[0]!)![1] as Tone) : 0;
+}
+
+/** Moves a tone mark that sits on the wrong vowel (the sheet has "shìdɑì", "toú", "hùi", "ɡǔo"). */
+function fixToneMarkPlacement(syllable: string): string {
+  const tone = pinyinTone(syllable);
+  if (!tone) return syllable;
+  const plain = [...syllable].map((c) => TONED_TO_BASE.get(c)?.[0] ?? c).join("");
+  return withToneMark(plain, tone);
+}
+
+/**
+ * Pinyin, one space per syllable, for a zhuyin cell that has its per-syllable spacing
+ * ("ㄕㄣ　ㄘㄥˊ" -> "shēn céng"). Undefined when a syllable is not standard zhuyin.
+ */
+export function zhuyinToPinyin(zhuyin: string): string | undefined {
+  const convert = (syllable: string) => {
+    const plain = zhuyinSyllableToPinyin(syllable);
+    return plain === undefined ? undefined : withToneMark(plain, zhuyinTone(syllable));
+  };
+  const syllables = splitZhuyin(zhuyin).flatMap((chunk) => {
+    const whole = /[ˊˇˋ].*[ˊˇˋ]/u.test(chunk) ? undefined : convert(chunk);
+    if (whole !== undefined) return [whole];
+    // typed without spacing ("ㄏㄜˊㄕㄤˋ"): a tone mark ends a syllable, a neutral-tone dot starts one
+    return (chunk.match(/˙?[^ˊˇˋ˙]+[ˊˇˋ]?/gu) ?? [chunk]).map(convert);
+  });
+  return syllables.length && !syllables.includes(undefined) ? syllables.join(" ") : undefined;
+}
+
+/**
+ * Syllables whose tone differs between a pinyin reading (one space per syllable) and the zhuyin
+ * cell of the same row, as "pinyin≠zhuyin" pairs. Empty when the two cannot be compared.
+ */
+export function toneMismatches(pinyin: string, zhuyin: string): string[] {
+  const p = pinyin.split(" ").filter(Boolean);
+  const z = splitZhuyin(zhuyin);
+  if (p.length !== z.length) return [];
+  return p.flatMap((syllable, i) => {
+    const expected = zhuyinSyllableToPinyin(z[i]!);
+    if (expected === undefined || expected !== stripTones(syllable)) return [];
+    const tone = pinyinTone(syllable.toLowerCase());
+    return tone === undefined || tone === zhuyinTone(z[i]!) ? [] : [`${syllable}≠${z[i]}`];
+  });
 }
 
 export type SplitStatus =

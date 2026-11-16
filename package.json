@@ -1,13 +1,13 @@
 {
   "name": "moe-dict-yomitan",
-  "module": "export.ts",
   "type": "module",
   "private": true,
   "engines": {
-    "node": ">=22.18"
+    "node": ">=22.18 <23 || >=23.6"
   },
   "scripts": {
     "build": "node export.ts",
+    "test": "node --test",
     "typecheck": "tsc --noEmit",
     "validate": "node scripts/validate.ts",
     "release-notes": "node scripts/release-notes.ts",
@@ -26,7 +26,7 @@
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "yomichan-dict-builder": "^2.11.4"
   },
-  "trustedDependencies": [
-    "opencc"
-  ]
+  "allowScripts": {
+    "opencc": true
+  }
 }

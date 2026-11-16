@@ -6,3 +6,6 @@
 *.gif binary
 *.png binary
 *.zip binary
+
+# pictures of the source sheets, whatever their extension
+dict/dict_*/** binary

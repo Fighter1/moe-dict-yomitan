@@ -12,8 +12,7 @@ coverage
 
 # logs
 logs
-_.log
-report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
+*.log
 
 # dotenv environment variable files
 .env
@@ -37,9 +36,3 @@ build/
 
 # written by the build and the scripts (stats, release notes, upstream report)
 reports/
-
-fix-eye.ts
-
-# generated per-edition stylesheets
-styles-pinyin.css
-styles-zhuyin.css

@@ -1,4 +1,5 @@
 // Checks the zips in build/ the way Yomitan will when it imports and updates them:
+//   - the six zips of release.ts are there, and nothing else
 //   - index.json and every term/tag bank against Yomitan's JSON schemas (schemas/)
 //   - isUpdatable + indexUrl/downloadUrl point at this repository's latest release, the sidecar
 //     index file next to the zip is the zip's own index.json, the revision has the shape Yomitan
@@ -8,28 +9,31 @@
 //   - the 注音 and 拼音 editions of a dictionary have the same number of entries and terms
 // Writes reports/stats.json (read by scripts/release-notes.ts) and, in GitHub Actions, a job summary.
 //
-// usage: node scripts/validate.ts [--dir build] [--repo owner/name] [--revision 2026.11.15.7]
+// usage: node scripts/validate.ts [--dir build] [--repo owner/name] [--revision 2026.11.15.7] [--after v2026.11.14.3]
+//   --revision  the revision every zip must have (default: the one in reports/build.json)
+//   --after     a released revision or tag these zips must be newer than, so Yomitan offers them
 import { Ajv, type ValidateFunction } from "ajv";
 import JSZip from "jszip";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "fs";
-import { basename, join } from "path";
-import { isDeepStrictEqual } from "util";
+import { join } from "path";
+import { isDeepStrictEqual, parseArgs } from "util";
+import { OUTPUTS, REVISION_PATTERN, isNewerRevision, releaseBaseUrl, resolveRepo, type BuildReport } from "../release.ts";
 
 const GOLDEN_WORDS_FILE = "dict/golden_words.tsv";
 const MAX_PROBLEMS_SHOWN = 40;
+const REPLACEMENT_CHARACTER = String.fromCharCode(0xfffd);
 
-const args = process.argv.slice(2);
-const arg = (name: string) => {
-  const i = args.indexOf(`--${name}`);
-  return i < 0 ? undefined : args[i + 1];
-};
-const dir = arg("dir") ?? "build";
-const build = existsSync("reports/build.json")
-  ? (JSON.parse(readFileSync("reports/build.json", "utf-8")) as { revision?: string; updateRepo?: string })
+const { values: args } = parseArgs({
+  options: { dir: { type: "string" }, repo: { type: "string" }, revision: { type: "string" }, after: { type: "string" } },
+});
+const dir = args.dir ?? "build";
+const build: Partial<BuildReport> = existsSync("reports/build.json")
+  ? JSON.parse(readFileSync("reports/build.json", "utf-8"))
   : {};
-const repo = arg("repo") ?? process.env.GITHUB_REPOSITORY ?? build.updateRepo ?? "Fighter1/moe-dict-yomitan";
-const expectedRevision = arg("revision") ?? build.revision;
-const releaseBase = `https://github.com/${repo}/releases/latest/download/`;
+const repo = args.repo ?? process.env.GITHUB_REPOSITORY ?? build.updateRepo ?? resolveRepo();
+const expectedRevision = args.revision ?? build.revision;
+const after = args.after?.replace(/^v/, "");
+const releaseBase = releaseBaseUrl(repo);
 
 const ajv = new Ajv({ allowUnionTypes: true, strict: false });
 const schema = (name: string) =>
@@ -45,14 +49,14 @@ const schemaErrors = (validate: ValidateFunction) =>
     .map((e) => `${e.instancePath || "/"} ${e.message}`)
     .join("; ");
 
-/** zip name without .zip -> the `term\treading` pairs that zip must contain. */
+/** zip name -> the `term\treading` pairs that zip must contain. */
 function readGoldenWords() {
   const golden = new Map<string, string[]>();
   for (const line of readFileSync(GOLDEN_WORDS_FILE, "utf-8").split(/\r?\n/)) {
     if (!line.trim() || line.startsWith("#")) continue;
     const [stem, term, reading] = line.split("\t");
     if (!stem || !term || reading === undefined) throw new Error(`${GOLDEN_WORDS_FILE}: cannot parse "${line}"`);
-    golden.set(stem, [...(golden.get(stem) ?? []), `${term}\t${reading}`]);
+    golden.set(`${stem}.zip`, [...(golden.get(`${stem}.zip`) ?? []), `${term}\t${reading}`]);
   }
   return golden;
 }
@@ -74,14 +78,19 @@ const stats: Stats[] = [];
 const problems: string[] = [];
 
 const golden = readGoldenWords();
-const zips = readdirSync(dir).filter((f) => f.endsWith(".zip")).sort();
-if (!zips.length) problems.push(`no zips in ${dir}/`);
-for (const stem of golden.keys())
-  if (!zips.includes(`${stem}.zip`)) problems.push(`${GOLDEN_WORDS_FILE} names ${stem}.zip, which is not in ${dir}/`);
+const expected = new Set<string>(OUTPUTS.map((output) => output.zip));
+for (const file of readdirSync(dir).filter((f) => f.endsWith(".zip")))
+  if (!expected.has(file)) problems.push(`${join(dir, file)} is not one of the dictionaries this repository builds`);
+for (const file of golden.keys()) if (!expected.has(file)) problems.push(`${GOLDEN_WORDS_FILE} names ${file}, which is not built`);
 
-for (const file of zips) {
+for (const output of OUTPUTS) {
+  const file = output.zip;
   const fail = (message: string) => problems.push(`${file}: ${message}`);
   const path = join(dir, file);
+  if (!existsSync(path)) {
+    fail(`not in ${dir}/`);
+    continue;
+  }
   const zip = await JSZip.loadAsync(readFileSync(path));
   const names = new Set(Object.keys(zip.files).filter((name) => !zip.files[name]!.dir));
   // JSZip's own string decoding has the same chunk-boundary problem as its encoding; take bytes.
@@ -95,19 +104,19 @@ for (const file of zips) {
   const index = JSON.parse(await text("index.json")) as Record<string, unknown>;
   if (!validators.index(index)) fail(`index.json: ${schemaErrors(validators.index)}`);
   const revision = String(index.revision ?? "");
-  if (!/^\d{4}\.\d{2}\.\d{2}\.\d+$/.test(revision))
+  if (!REVISION_PATTERN.test(revision))
     fail(`revision "${revision}" is not four dot-separated integers, so Yomitan would compare it as text`);
+  else if (after && REVISION_PATTERN.test(after) && !isNewerRevision(revision, after))
+    fail(`revision ${revision} is not newer than ${after}, so Yomitan would not offer it as an update`);
   if (expectedRevision && revision !== expectedRevision) fail(`revision is ${revision}, expected ${expectedRevision}`);
+  // What Yomitan's "Check for updates" needs: it fetches indexUrl, compares revisions and, if
+  // the published one is newer, downloads downloadUrl.
   if (index.isUpdatable !== true) fail("index.json has no isUpdatable: true");
   if (index.downloadUrl !== releaseBase + file) fail(`downloadUrl is ${index.downloadUrl}, expected ${releaseBase + file}`);
-  const indexUrl = String(index.indexUrl ?? "");
-  if (!indexUrl.startsWith(releaseBase)) fail(`indexUrl is ${indexUrl}, expected it under ${releaseBase}`);
-  else {
-    // Yomitan fetches indexUrl to learn the newest revision, so the sidecar must be this index.
-    const sidecar = join(dir, basename(indexUrl));
-    if (!existsSync(sidecar)) fail(`${sidecar} (the indexUrl asset) is missing`);
-    else if (!isDeepStrictEqual(JSON.parse(readFileSync(sidecar, "utf-8")), index)) fail(`${sidecar} differs from the zip's index.json`);
-  }
+  if (index.indexUrl !== releaseBase + output.index) fail(`indexUrl is ${index.indexUrl}, expected ${releaseBase + output.index}`);
+  const sidecar = join(dir, output.index);
+  if (!existsSync(sidecar)) fail(`${sidecar} (the indexUrl asset) is missing`);
+  else if (!isDeepStrictEqual(JSON.parse(readFileSync(sidecar, "utf-8")), index)) fail(`${sidecar} differs from the zip's index.json`);
 
   // term and tag banks
   let terms = 0;
@@ -119,7 +128,7 @@ for (const file of zips) {
     const kind = /^term_bank_\d+\.json$/.test(name) ? "term" : /^tag_bank_\d+\.json$/.test(name) ? "tag" : undefined;
     if (!kind) continue;
     const raw = await text(name);
-    if (raw.includes("�")) fail(`${name} contains U+FFFD (a character was mangled on the way into the zip)`);
+    if (raw.includes(REPLACEMENT_CHARACTER)) fail(`${name} contains U+FFFD (a character was mangled on the way into the zip)`);
     const bank = JSON.parse(raw) as unknown[][];
     if (!validators[kind](bank)) {
       fail(`${name}: ${schemaErrors(validators[kind])}`);
@@ -136,8 +145,9 @@ for (const file of zips) {
     }
   }
   if (!terms) fail("no term entries");
-  for (const word of golden.get(file.replace(/\.zip$/, "")) ?? [])
-    if (!present.has(word)) fail(`golden word missing: ${word.replace("\t", " [")}]`);
+  const goldenWords = golden.get(file) ?? [];
+  if (!goldenWords.length) fail(`${GOLDEN_WORDS_FILE} has no word for this zip`);
+  for (const word of goldenWords) if (!present.has(word)) fail(`golden word missing: ${word.replace("\t", " [")}]`);
   const missing = [...images].filter((image) => !names.has(image));
   if (missing.length) fail(`${missing.length} images are referenced but not in the zip, e.g. ${missing.slice(0, 3).join(", ")}`);
   if (!names.has("styles.css")) fail("no styles.css");
@@ -150,12 +160,11 @@ for (const file of zips) {
 }
 
 // The 注音 and 拼音 editions of a dictionary are the same rows with different readings.
-for (const pinyin of stats.filter((s) => s.file.endsWith("-pinyin.zip"))) {
-  const zhuyin = stats.find((s) => s.file === pinyin.file.replace("-pinyin.zip", "-zhuyin.zip"));
-  if (!zhuyin) problems.push(`${pinyin.file} has no 注音 edition next to it`);
-  else if (zhuyin.entries !== pinyin.entries || zhuyin.terms !== pinyin.terms)
-    problems.push(`${pinyin.file} and ${zhuyin.file} have different entry or term counts`);
-}
+const dictionaryOf = (file: string) => file.replace(/-(zhuyin|pinyin)\.zip$/, "");
+for (const [i, a] of stats.entries())
+  for (const b of stats.slice(i + 1))
+    if (dictionaryOf(a.file) === dictionaryOf(b.file) && (a.entries !== b.entries || a.terms !== b.terms))
+      problems.push(`${a.file} and ${b.file} have different entry or term counts`);
 if (new Set(stats.map((s) => s.revision)).size > 1) problems.push("the zips do not all carry the same revision");
 
 mkdirSync("reports", { recursive: true });
@@ -183,4 +192,4 @@ if (problems.length) {
   if (problems.length > MAX_PROBLEMS_SHOWN) console.error(`  … and ${problems.length - MAX_PROBLEMS_SHOWN} more`);
   process.exit(1);
 }
-console.log(`\n${zips.length} zips valid; update URLs under ${releaseBase}`);
+console.log(`\n${stats.length} zips valid; update URLs under ${releaseBase}`);

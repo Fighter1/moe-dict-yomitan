@@ -1,20 +1,15 @@
 import { findSyllableBoundaries } from "pinyin-tone-tool";
+import { buildNotes } from "./notes.ts";
 import { alignWithZhuyin, normalizePinyin } from "./pinyin.ts";
 
-const splitPinyinSyllables = (s: string) =>
-  findSyllableBoundaries(s).map((b) => s.slice(b.start, b.end));
+const splitPinyinSyllables = (s: string) => findSyllableBoundaries(s).map((b) => s.slice(b.start, b.end));
 
 function splitWithLibrary(s: string) {
-  if (s.match(/huěr/g)) {
-    return splitPinyinSyllables(s.replaceAll("huěr", "huǐr")).map((syllable) =>
-      syllable.replaceAll("huǐr", "huěr")
-    );
-  }
+  // the library does not know the erhua spelling "huěr" (會兒)
+  if (s.includes("huěr"))
+    return splitPinyinSyllables(s.replaceAll("huěr", "huǐr")).map((syllable) => syllable.replaceAll("huǐr", "huěr"));
   return splitPinyinSyllables(s);
 }
-
-/** Pinyin cells the library could not split cleanly and the zhuyin cell of the row could not settle either. */
-export const unresolvedPinyin: string[] = [];
 
 /**
  * "yìshí-liǎnɡniǎo" -> "yì shí liǎng niǎo"
@@ -23,6 +18,7 @@ export const unresolvedPinyin: string[] = [];
 export function parsePinyin(raw: string, zhuyin?: string) {
   const s = normalizePinyin(raw).replace(/[-,]/g, " ");
   const { syllables, status } = alignWithZhuyin(s, splitWithLibrary(s), zhuyin);
-  if (status === "unresolved") unresolvedPinyin.push(`${raw}  /  ${zhuyin}`);
+  // the library could not split the cell cleanly and the zhuyin cell of the row could not settle it either
+  if (status === "unresolved") buildNotes.unresolvedPinyin.push(`${raw}  /  ${zhuyin}`);
   return syllables.join(" ");
 }

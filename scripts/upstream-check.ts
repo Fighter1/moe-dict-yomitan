@@ -4,21 +4,26 @@
 // Without --update it downloads nothing and only reports. With --update it downloads each newer
 // MOE zip, puts its sheet (and picture folder) into dict/, removes the old ones and points
 // dict/sources.json at the new files; a changed 兩岸詞典.xlsx is downloaded over the old one.
-// Writes reports/upstream.md and, in GitHub Actions, the outputs `updated` (files in dict/ were
-// replaced) and `manual` (a source is no longer offered, which needs a person).
+// Everything is downloaded and checked before anything in dict/ is touched, so a failed
+// download leaves dict/ and dict/sources.json as they were.
+// Writes reports/upstream.md and, in GitHub Actions, the outputs `newer` (upstream offers
+// something newer), `updated` (files in dict/ were replaced) and `manual` (a source is no longer
+// offered, which needs a person).
 //
 // usage: node scripts/upstream-check.ts [--update]
 import { createHash } from "crypto";
 import JSZip from "jszip";
 import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { basename } from "path";
+import type { Source } from "../release.ts";
 
 const MOE_BASE = "https://language.moe.gov.tw/001/Upload/Files/site_content/M0001/respub/";
 const MOE_PAGES = ["dict_concised_download.html", "dict_reviseddict_download.html"];
 const SOURCES_FILE = "dict/sources.json";
+const PICTURE = /^[\w.-]+\.(?:jpe?g|gif|png|bmp|webp)$/i;
+const IGNORED_FILES = new Set(["Thumbs.db", ".DS_Store", "desktop.ini"]);
 const update = process.argv.includes("--update");
 
-type Source = { upstream?: string; version?: string; path: string; index?: string; repo?: string; file?: string; blobSha?: string };
 const sources = JSON.parse(readFileSync(SOURCES_FILE, "utf-8")) as Record<string, Source>;
 
 async function get(url: string, headers: Record<string, string> = {}) {
@@ -26,39 +31,51 @@ async function get(url: string, headers: Record<string, string> = {}) {
   if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
   return response;
 }
+const githubHeaders = (): Record<string, string> =>
+  process.env.GITHUB_TOKEN ? { authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {};
 
-/** Replaces the files of one MOE source with those of the zip at `url`. */
-async function replaceFromZip(source: Source, version: string, url: string) {
+/** What replacing one source means on disk; nothing is written until all of them are known. */
+type Replacement = { files: Map<string, Buffer>; remove: string[]; apply(): void };
+
+/** The files of the newer MOE zip at `url` and the changes to `source` that go with them. */
+async function fromMoeZip(source: Source, version: string, url: string): Promise<Replacement> {
   const stem = `${source.upstream}_${version}`;
   const zip = await JSZip.loadAsync(Buffer.from(await (await get(url)).arrayBuffer()));
   const sheet = zip.file(`${stem}.xlsx`);
   if (!sheet) throw new Error(`${url} has no ${stem}.xlsx`);
-  // the picture set is a folder of images next to its index sheet; names are taken as plain
-  // file names, so nothing in the zip can be written outside dict/
-  const pictures = Object.values(zip.files).filter((f) => !f.dir && f.name.startsWith(`${stem}/`) && /^[\w.-]+$/.test(basename(f.name)));
+  const files = new Map([[`dict/${stem}.xlsx`, await sheet.async("nodebuffer")]]);
   const isPictureSet = source.index !== undefined;
-  if (isPictureSet && !pictures.length) throw new Error(`${url} has no ${stem}/ picture folder`);
-
-  for (const old of [source.path, source.index]) if (old?.startsWith("dict/")) rmSync(old, { recursive: true, force: true });
-  writeFileSync(`dict/${stem}.xlsx`, await sheet.async("nodebuffer"));
   if (isPictureSet) {
-    mkdirSync(`dict/${stem}`, { recursive: true });
-    for (const picture of pictures) writeFileSync(`dict/${stem}/${basename(picture.name)}`, await picture.async("nodebuffer"));
-    source.path = `dict/${stem}`;
-    source.index = `dict/${stem}.xlsx`;
-  } else source.path = `dict/${stem}.xlsx`;
-  source.version = version;
+    // The picture set is a folder of images next to its index sheet. Names are taken as plain
+    // file names, so nothing in the zip can be written outside dict/.
+    for (const entry of Object.values(zip.files).filter((f) => !f.dir && f.name.startsWith(`${stem}/`))) {
+      const name = basename(entry.name);
+      if (IGNORED_FILES.has(name)) continue;
+      const path = `dict/${stem}/${name}`;
+      if (!PICTURE.test(name) || files.has(path)) throw new Error(`${url}: unexpected file ${entry.name} in the picture folder`);
+      files.set(path, await entry.async("nodebuffer"));
+    }
+    if (files.size === 1) throw new Error(`${url} has no ${stem}/ picture folder`);
+  }
+  return {
+    files,
+    remove: [source.path, source.index].filter((path): path is string => !!path?.startsWith("dict/")),
+    apply() {
+      source.version = version;
+      source.path = isPictureSet ? `dict/${stem}` : `dict/${stem}.xlsx`;
+      if (isPictureSet) source.index = `dict/${stem}.xlsx`;
+    },
+  };
 }
 
-/** Replaces a sheet kept in a GitHub repository; `sha` is the git blob id its listing reports. */
-async function replaceFromRepo(source: Source, sha: string) {
-  const url = `https://raw.githubusercontent.com/${source.repo}/HEAD/${encodeURIComponent(source.file!)}`;
-  const bytes = Buffer.from(await (await get(url)).arrayBuffer());
+/** A sheet kept in a GitHub repository, fetched by the git blob id its listing reports. */
+async function fromRepo(source: Source, sha: string): Promise<Replacement> {
+  const url = `https://api.github.com/repos/${source.repo}/git/blobs/${sha}`;
+  const bytes = Buffer.from(await (await get(url, { accept: "application/vnd.github.raw", ...githubHeaders() })).arrayBuffer());
   // a git blob id is the SHA-1 of "blob <size>\0" followed by the content
   const downloaded = createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
-  if (downloaded !== sha) throw new Error(`${url}: downloaded blob ${downloaded}, the listing says ${sha}`);
-  writeFileSync(source.path, bytes);
-  source.blobSha = sha;
+  if (downloaded !== sha) throw new Error(`${url}: the download has blob id ${downloaded}`);
+  return { files: new Map([[source.path, bytes]]), remove: [], apply: () => void (source.blobSha = sha) };
 }
 
 // family ("dict_revised_2015") -> the newest version listed and its link
@@ -72,35 +89,47 @@ if (!offered.size) throw new Error("no dataset links found on the MOE download p
 
 const newer: string[] = []; // sources with a later version (replaced when --update)
 const manual: string[] = []; // changes this script does not apply
+const replacements: Replacement[] = [];
 for (const [name, source] of Object.entries(sources)) {
   if (source.upstream) {
+    if (!/^\d{8}$/.test(source.version ?? "")) throw new Error(`${SOURCES_FILE}: ${name} has no version`);
     const latest = offered.get(source.upstream);
     if (!latest) manual.push(`- **${name}**: \`${source.upstream}\` is no longer listed on the MOE download pages.`);
     else if (latest.version > source.version!) {
       newer.push(`- **${name}**: \`${source.upstream}\` ${source.version} → **${latest.version}** ([download](${latest.url}))`);
-      if (update) {
-        await replaceFromZip(source, latest.version, latest.url);
-        console.log(`replaced ${name} with ${source.upstream}_${latest.version}`);
-      }
+      if (update) replacements.push(await fromMoeZip(source, latest.version, latest.url));
     }
   } else if (source.repo) {
-    const token = process.env.GITHUB_TOKEN;
-    const listing = (await (
-      await get(`https://api.github.com/repos/${source.repo}/contents/`, token ? { authorization: `Bearer ${token}` } : {})
-    ).json()) as { name: string; sha: string }[];
+    const listing = (await (await get(`https://api.github.com/repos/${source.repo}/contents/`, githubHeaders())).json()) as {
+      name: string;
+      sha: string;
+    }[];
     const sha = listing.find((entry) => entry.name === source.file)?.sha;
     if (!sha) manual.push(`- **${name}**: \`${source.file}\` is no longer in ${source.repo}.`);
     else if (sha !== source.blobSha) {
       newer.push(`- **${name}**: \`${source.file}\` in ${source.repo} changed (blob ${source.blobSha?.slice(0, 12)} → **${sha.slice(0, 12)}**)`);
-      if (update) {
-        await replaceFromRepo(source, sha);
-        console.log(`replaced ${name} with ${source.file} ${sha.slice(0, 12)}`);
-      }
+      if (update) replacements.push(await fromRepo(source, sha));
     }
   }
 }
-const updated = update && newer.length > 0;
-if (updated) writeFileSync(SOURCES_FILE, JSON.stringify(sources, null, 2) + "\n");
+
+// Everything is downloaded: new files first, then the manifest, and the old files last.
+const updated = replacements.length > 0;
+if (updated) {
+  const written = new Set<string>();
+  for (const { files } of replacements)
+    for (const [path, bytes] of files) {
+      mkdirSync(path.slice(0, path.lastIndexOf("/")), { recursive: true });
+      writeFileSync(path, bytes);
+      written.add(path);
+    }
+  for (const replacement of replacements) replacement.apply();
+  writeFileSync(SOURCES_FILE, JSON.stringify(sources, null, 2) + "\n");
+  const kept = new Set(Object.values(sources).flatMap((source) => [source.path, source.index]));
+  for (const { remove } of replacements)
+    for (const path of remove) if (!kept.has(path) && !written.has(path)) rmSync(path, { recursive: true, force: true });
+  console.log(`replaced ${written.size} files in dict/`);
+}
 
 const report: string[] = [];
 if (newer.length)

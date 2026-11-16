@@ -1,31 +1,22 @@
 // Writes the notes of a release from reports/stats.json (scripts/validate.ts) and
 // reports/build.json (export.ts): one row per zip, the versions of the source sheets, what changed
-// since the previous release (read back from the table in that release's notes) and the pinyin
-// cells of the 兩岸詞典 sheet that could not be reconciled with their zhuyin cell.
+// since the previous release (read back from the table in that release's notes) and what the
+// build noticed about the readings in the sheets.
 //
 // usage: node scripts/release-notes.ts [--previous previous.json] [--out reports/release-notes.md]
 //   previous.json is `gh release view --json tagName,body`; left out for the first release.
 import { existsSync, readFileSync, writeFileSync } from "fs";
+import { parseArgs } from "util";
+import type { BuildReport, Source } from "../release.ts";
 import type { Stats } from "./validate.ts";
 
-const args = process.argv.slice(2);
-const arg = (name: string) => {
-  const i = args.indexOf(`--${name}`);
-  return i < 0 ? undefined : args[i + 1];
-};
+const { values: args } = parseArgs({ options: { previous: { type: "string" }, out: { type: "string" } } });
 
-type Source = { upstream?: string; version?: string; repo?: string; file?: string; blobSha?: string };
 const stats = JSON.parse(readFileSync("reports/stats.json", "utf-8")) as Stats[];
-const build = JSON.parse(readFileSync("reports/build.json", "utf-8")) as {
-  revision: string;
-  updateRepo: string;
-  sources: Record<string, Source>;
-  unresolvedPinyin: string[];
-};
-const previousPath = arg("previous");
+const build = JSON.parse(readFileSync("reports/build.json", "utf-8")) as BuildReport;
 const previous =
-  previousPath && existsSync(previousPath)
-    ? (JSON.parse(readFileSync(previousPath, "utf-8") || "{}") as { tagName?: string; body?: string })
+  args.previous && existsSync(args.previous)
+    ? (JSON.parse(readFileSync(args.previous, "utf-8") || "{}") as { tagName?: string; body?: string })
     : {};
 
 const count = (n: number) => n.toLocaleString("en");
@@ -49,28 +40,31 @@ if (previous.tagName && previous.body) {
   const before = new Map(
     [...previous.body.matchAll(/^\| `([^`]+)` \|[^|]*\| ([\d,]+) \|/gm)].map((m) => [m[1]!, Number(m[2]!.replaceAll(",", ""))]),
   );
-  const changed = stats
-    .map((s) => ({ ...s, was: before.get(s.file) }))
-    .filter((s) => s.was !== s.entries)
-    .map((s) => `- \`${s.file}\`: ${s.was === undefined ? "new" : `${count(s.was)} → ${count(s.entries)} entries (${s.entries > s.was ? "+" : ""}${count(s.entries - s.was)})`}`);
+  const changes: string[] = [];
+  // a release whose notes were written by hand has no table to compare with
+  if (before.size) {
+    for (const s of stats) {
+      const was = before.get(s.file);
+      if (was === undefined) changes.push(`- \`${s.file}\`: new`);
+      else if (was !== s.entries)
+        changes.push(`- \`${s.file}\`: ${count(was)} → ${count(s.entries)} entries (${s.entries > was ? "+" : ""}${count(s.entries - was)})`);
+    }
+    for (const file of before.keys()) if (!stats.some((s) => s.file === file)) changes.push(`- \`${file}\`: no longer built`);
+    if (!changes.length) changes.push("- Entry counts are unchanged.");
+  }
   const oldSources = previous.body.match(/^Sources: (.*)\.$/m)?.[1];
-  lines.push("", `## Changes since ${previous.tagName}`, "");
-  lines.push(...(changed.length ? changed : before.size ? ["- Entry counts are unchanged."] : []));
-  if (oldSources && oldSources !== sourceLine) lines.push(`- Sources were ${oldSources}.`);
-  else if (oldSources) lines.push("- Same source sheets.");
+  if (oldSources && oldSources !== sourceLine) changes.push(`- Sources were ${oldSources}.`);
+  else if (oldSources) changes.push("- Same source sheets.");
+  if (changes.length) lines.push("", `## Changes since ${previous.tagName}`, "", ...changes);
 }
 
-if (build.unresolvedPinyin.length)
-  lines.push(
-    "",
-    `<details><summary>${build.unresolvedPinyin.length} 兩岸詞典 pinyin cells disagree with the zhuyin cell of their row</summary>`,
-    "",
-    "```",
-    ...build.unresolvedPinyin,
-    "```",
-    "",
-    "</details>",
-  );
+const details = (summary: string, items: string[]) =>
+  items.length ? ["", `<details><summary>${items.length} ${summary}</summary>`, "", "```", ...items, "```", "", "</details>"] : [];
+lines.push(
+  ...details("readings whose pinyin was taken from the zhuyin cell (the pinyin cell is empty, cut short or not pinyin)", build.pinyinFromZhuyin),
+  ...details("pinyin cells with a different tone than the zhuyin cell of their row (left as they are)", build.toneMismatches),
+  ...details("兩岸詞典 pinyin cells that disagree with the zhuyin cell of their row", build.unresolvedPinyin),
+);
 
 lines.push(
   "",
@@ -78,6 +72,6 @@ lines.push(
     "**Update:** the zips are self-updating: Yomitan → Settings → Dictionaries → *Check for updates*.",
 );
 
-const out = arg("out") ?? "reports/release-notes.md";
+const out = args.out ?? "reports/release-notes.md";
 writeFileSync(out, lines.join("\n") + "\n");
 console.log(`wrote ${out}`);

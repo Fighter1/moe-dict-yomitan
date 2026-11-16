@@ -2,8 +2,8 @@ name: Upstream check
 
 # Weekly: compare dict/sources.json with the MOE download pages and the g0v repository.
 #   - A newer MOE sheet or a changed 兩岸詞典 sheet is downloaded into dict/ and proposed as a
-#     pull request (branch upstream-sources). "Build and check" is started on that branch, so the pull request shows
-#     whether the new sheets build and validate.
+#     pull request (branch upstream-sources). "Build and check" is started on that branch, so the
+#     pull request shows whether the new sheets build and validate.
 #   - A source that is no longer offered upstream cannot be replaced automatically; it opens or
 #     refreshes an issue.
 # Opening the pull request needs "Allow GitHub Actions to create and approve pull requests"
@@ -11,18 +11,20 @@ name: Upstream check
 
 on:
   schedule:
-    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+    - cron: "23 6 * * 1" # Mondays 06:23 UTC
   workflow_dispatch:
 
 permissions:
   contents: write
   pull-requests: write
   issues: write
-  actions: write # to start "Build and check" on the branch
+  actions: write # to start "Build and check" on the branch and to keep this schedule enabled
 
 concurrency:
   group: upstream-check
-  cancel-in-progress: true
+  # a run that is cancelled between pushing the branch and opening the pull request would leave
+  # the branch without one
+  cancel-in-progress: false
 
 jobs:
   check:
@@ -32,9 +34,9 @@ jobs:
       run:
         shell: bash
     env:
-      GH_TOKEN: ${{ github.token }}
       BRANCH: upstream-sources
       ISSUE_TITLE: Upstream sources changed
+      BOT_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
     steps:
       - uses: actions/checkout@v7
 
@@ -44,7 +46,8 @@ jobs:
           cache: npm
 
       - name: Install
-        run: npm ci
+        # the script only needs jszip; no package's install script has to run for it
+        run: npm ci --ignore-scripts
 
       - name: Compare dict/sources.json with upstream and fetch newer sheets
         id: check
@@ -56,33 +59,50 @@ jobs:
 
       - name: Open or update the pull request
         if: steps.check.outputs.updated == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.email "$BOT_EMAIL"
           git checkout -B "$BRANCH"
           git add -A dict
-          # Nothing to do when the branch already proposes exactly these files.
-          if git fetch origin "$BRANCH" 2> /dev/null && git diff --cached --quiet FETCH_HEAD -- dict; then
+          existing=""
+          if git fetch --depth=1 origin "$BRANCH" 2> /dev/null; then existing="$(git rev-parse FETCH_HEAD)"; fi
+          if [ -n "$existing" ] && git diff --cached --quiet "$existing" -- dict; then
             echo "the $BRANCH branch already has these sheets"
-            exit 0
+            tip="$existing"
+          elif [ -n "$existing" ] && [ "$(git log -1 --format=%ce "$existing")" != "$BOT_EMAIL" ]; then
+            # someone pushed to the branch (a parser fix for the new sheets, say): leave it alone
+            echo "::warning::$BRANCH has commits that are not from this workflow and other sheets than upstream offers now; merge or delete it"
+            tip="$existing"
+          else
+            git commit -m "Update the source sheets"
+            git push --force origin "HEAD:refs/heads/$BRANCH"
+            tip="$(git rev-parse HEAD)"
           fi
-          git commit -m "Update the source sheets"
-          git push --force --set-upstream origin "$BRANCH"
-          if [ "$(gh pr list --head "$BRANCH" --state open --json number --jq length)" = "0" ]; then
-            if ! gh pr create --base "${{ github.event.repository.default_branch }}" --head "$BRANCH" \
-              --title "Update the source sheets" --body-file reports/upstream.md; then
+          # Pull requests of this repository only: --head also matches a fork's branch of that name.
+          prs="$(gh pr list --head "$BRANCH" --state all --json number,state,headRefOid,isCrossRepository \
+            --jq '[.[] | select(.isCrossRepository | not)]')"
+          open="$(jq -r '[.[] | select(.state == "OPEN")][0].number // empty' <<< "$prs")"
+          proposed="$(jq --arg tip "$tip" '[.[] | select(.headRefOid == $tip)] | length' <<< "$prs")"
+          if [ -n "$open" ]; then
+            gh pr edit "$open" --body-file reports/upstream.md
+          elif [ "$proposed" = "0" ]; then # a pull request for this very commit that was closed by hand stays closed
+            if ! gh pr create --head "$BRANCH" --title "Update the source sheets" --body-file reports/upstream.md; then
               echo "::error::the $BRANCH branch is pushed, but the pull request could not be opened; allow GitHub Actions to create pull requests (Settings → Actions → General) or open it from the branch"
               exit 1
             fi
-          else
-            gh pr edit "$BRANCH" --body-file reports/upstream.md
           fi
           # A pull request opened with the workflow token does not start other workflows, so the
           # build is started here; its result is attached to the branch's commit.
-          gh workflow run ci.yml --ref "$BRANCH"
+          if [ "$(gh run list --workflow ci.yml --commit "$tip" --json databaseId --jq length)" = "0" ]; then
+            gh workflow run ci.yml --ref "$BRANCH"
+          fi
 
       - name: Open or update the issue
         if: steps.check.outputs.manual == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           number="$(gh issue list --state open --search "in:title \"$ISSUE_TITLE\"" --json number,title \
             --jq "[.[] | select(.title == \"$ISSUE_TITLE\")][0].number // empty")"
@@ -94,9 +114,18 @@ jobs:
 
       - name: Close the issue when everything is current
         if: steps.check.outputs.newer == 'false' && steps.check.outputs.manual == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           number="$(gh issue list --state open --search "in:title \"$ISSUE_TITLE\"" --json number,title \
             --jq "[.[] | select(.title == \"$ISSUE_TITLE\")][0].number // empty")"
           if [ -n "$number" ]; then
             gh issue close "$number" --comment "The sources in \`dict/sources.json\` are current again."
           fi
+
+      - name: Keep the schedule enabled
+        # GitHub disables scheduled workflows of a repository without activity for 60 days,
+        # which is exactly when this check is the only thing watching the sources.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/$GITHUB_REPOSITORY/actions/workflows/upstream-check.yml/enable"

@@ -97,6 +97,32 @@
   border-radius: 4px;
   padding: 4px;
 }
+/* 多音: the other readings of the headword */
+[data-sc-moedict="antonyms-parent"] + [data-sc-moedict="other-readings-parent"] {
+  margin-top: 3px;
+}
+[data-sc-moedict="other-readings-label"] {
+  display: inline-block;
+  line-height: 1;
+  background: #111;
+  border: 1px solid #454545;
+  border-radius: 4px;
+  color: #ddcd4b;
+  padding: 4px;
+  margin-right: 4px;
+}
+[data-sc-moedict="other-readings-content"] {
+  display: inline-block;
+  line-height: 1;
+  background: #111;
+  border: 1px solid #454545;
+  border-radius: 4px;
+  padding: 4px;
+  margin-right: 4px;
+}
+[data-sc-moedict="other-readings-reading"] {
+  padding-left: 4px;
+}
 [data-sc-moedict="pos-entry-parent"] {
   margin-top: 2px;
 }

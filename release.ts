@@ -69,8 +69,8 @@ export function checkRevision(revision: string): string {
  * REVISION from the environment (the release workflow passes the UTC date plus its run number),
  * else the UTC date plus ".0", so a local build never outranks a release of the same day.
  */
-export function resolveRevision(fromEnv = process.env.REVISION, now = new Date()): string {
-  return checkRevision(fromEnv?.trim() || `${now.toISOString().slice(0, 10).replaceAll("-", ".")}.0`);
+export function resolveRevision(env: { REVISION?: string } = process.env, now = new Date()): string {
+  return checkRevision(env.REVISION?.trim() || `${now.toISOString().slice(0, 10).replaceAll("-", ".")}.0`);
 }
 
 /** Is `a` a later revision than `b`? Both must match REVISION_PATTERN. */

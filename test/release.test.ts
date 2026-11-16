@@ -4,15 +4,16 @@ import { test } from "node:test";
 import { OUTPUTS, isNewerRevision, repoFromRemoteUrl, resolveRevision } from "../release.ts";
 
 test("a revision is the UTC date plus a build number", () => {
-  assert.equal(resolveRevision("2026.11.15.7"), "2026.11.15.7");
-  assert.equal(resolveRevision(" 2026.11.15.7\n"), "2026.11.15.7");
+  // the environment is passed in, so the test does not depend on a REVISION the release job sets
+  assert.equal(resolveRevision({ REVISION: "2026.11.15.7" }), "2026.11.15.7");
+  assert.equal(resolveRevision({ REVISION: " 2026.11.15.7\n" }), "2026.11.15.7");
   // no REVISION: ".0", below any release of that day
-  assert.equal(resolveRevision(undefined, new Date("2026-11-15T23:59:00Z")), "2026.11.15.0");
-  assert.equal(resolveRevision("", new Date("2026-01-02T00:00:00Z")), "2026.01.02.0");
+  assert.equal(resolveRevision({}, new Date("2026-11-15T23:59:00Z")), "2026.11.15.0");
+  assert.equal(resolveRevision({ REVISION: "" }, new Date("2026-01-02T00:00:00Z")), "2026.01.02.0");
   // anything else would be compared as text by Yomitan
-  assert.throws(() => resolveRevision("2026/11/15.1"));
-  assert.throws(() => resolveRevision("2026.11.15"));
-  assert.throws(() => resolveRevision("v2026.11.15.1"));
+  assert.throws(() => resolveRevision({ REVISION: "2026/11/15.1" }));
+  assert.throws(() => resolveRevision({ REVISION: "2026.11.15" }));
+  assert.throws(() => resolveRevision({ REVISION: "v2026.11.15.1" }));
 });
 
 test("revisions are compared number by number", () => {

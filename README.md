@@ -73,7 +73,7 @@ Run the **Build and release** workflow from the Actions tab. It tests, builds, v
 
 It has two inputs: `publish` (off: build only, the zips are kept as a workflow artifact) and `revision` (to choose the revision yourself). It refuses to publish from another branch than the default one, a commit that is no longer the head of that branch, a tag that exists, and a revision that is not newer than the latest release, because Yomitan would not offer it.
 
-Nothing is released on a push; pushes and pull requests only run **Build and check** (typecheck, tests, build, validate), which keeps the zips as a workflow artifact.
+Nothing is released on a push; pushes to `main` and pull requests only run **Build and check** (typecheck, tests, build, validate), which keeps the zips as a workflow artifact.
 
 # Source
 
@@ -88,4 +88,4 @@ Dictionary files from [here (moe)](https://language.moe.gov.tw/001/Upload/Files/
 
 # Dependencies
 
-Dependabot opens a pull request a week for npm packages (minor and patch updates together, each major on its own) and one for the GitHub Actions the workflows use. `xlsx` is installed from a tarball on cdn.sheetjs.com, which Dependabot does not track, so that one is updated by hand. `allowScripts` in `package.json` records that the install script of `opencc` may run.
+Dependabot opens a pull request a week for npm packages (minor and patch updates together, each major on its own) and one for the GitHub Actions the workflows use. It leaves major versions of `@types/node` alone: that package follows the Node version in `.nvmrc`, and the two are raised together by hand. `xlsx` is installed from a tarball on cdn.sheetjs.com, which Dependabot does not track, so that one is updated by hand. `allowScripts` in `package.json` records that the install script of `opencc` may run.

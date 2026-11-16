@@ -112,7 +112,9 @@ function isInsideBrackets(text: string, at: number): boolean {
 
 /** The definitions of one part of speech (or of the whole entry), one per line. */
 function getContent(lines: string[], kind: Kind): StructuredContentNode {
-  const definitions = lines.map((line) => {
+  const definitions: StructuredContentNode[] = [];
+  let items: StructuredContentNode[] | undefined; // the numbered items under the heading above
+  for (const line of lines) {
     let definition = line;
     let examples: StructuredContentNode[] = [];
     let also: StructuredContentNode = "";
@@ -127,13 +129,28 @@ function getContent(lines: string[], kind: Kind): StructuredContentNode {
 
     const [beforeExample = "", example] = definition.split(/\[例\](.*)/s);
     const text = beforeExample.trim();
-    let content: StructuredContentNode = text;
-    // "人名：(1)…" - the part before the colon heads the numbered items that follow
-    const heading = text.match(/^(.*)：(\(\d\).*)$/);
-    if (heading) content = [span("pos-label", heading[1]!), span("pos-first-content", [{ tag: "br" }, heading[2]!])];
     if (kind === "Concised" && example) examples.push(getExample("例", example, "Concised"));
-    return div("definition-entry", [span("definition-entry-content", content), also, examples]);
-  });
+    const entry = (content: string) => div("definition-entry", [span("definition-entry-content", content), also, examples]);
+
+    // "人名：(1)…" or "2.稱謂：(1)…" - the part before the colon heads the numbered items, which
+    // follow one a line. As in the online dictionary, the heading is a line of text that ends in
+    // the colon, with the items below it; under a numbered heading they are indented.
+    const heading = text.match(/^(.*)：(\(\d\).*)$/);
+    if (heading) {
+      const title = heading[1]!.replace(/^(\d+\.)\s+/, "$1"); // 簡編本 has a few "7. 量詞"
+      items = [entry(heading[2]!)];
+      definitions.push(
+        div("definition-entry", [
+          span("definition-entry-content", `${title}：`),
+          div("definition-entry-items", items, /^\d+\./.test(title) ? { numbered: "true" } : {}),
+        ]),
+      );
+    } else if (items && /^\(\d+\)/.test(text)) items.push(entry(text));
+    else {
+      items = undefined;
+      definitions.push(entry(text));
+    }
+  }
   return div("meaning-parent", definitions);
 }
 
@@ -210,7 +227,8 @@ export function getOtherReadings(cell: string): StructuredContentNode {
     );
   }
   if (!items.length) items.push(span("other-readings-content", text.replace(/（[^）]*）/g, "").trim()));
-  return labelled("other-readings", "多音", items, { tag: "div" });
+  // the readings are a list of their own, so that styles.css can draw a line between them
+  return labelled("other-readings", "多音", [span("other-readings-list", items)], { tag: "div" });
 }
 
 /** 字詞號 -> the pictures of that entry (簡編本 only). */
@@ -314,8 +332,11 @@ export async function addTermsMoe(
     if (otherReadings) additionalFields.push(getOtherReadings(otherReadings));
 
     const simplified = simplifiedConverter.convertSync(term);
+    const altReading = getAltReadingContent(altReadingType, readings.alt);
     const content: StructuredContent = [
-      span("first-row-parent", [termsParent(term, simplified), getAltReadingContent(altReadingType, readings.alt)]),
+      span("first-row-parent", [termsParent(term, simplified)]),
+      // 讀音, 語音 and the like go on a row of their own, below the headword
+      ...(altReading ? [div("info-row-parent", [altReading])] : []),
       additionalFields.length ? div("additional-fields-parent", additionalFields) : "",
       getMeaning(normalizeMeaning(text(row, "釋義") ?? ""), kind),
     ];

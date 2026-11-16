@@ -11,6 +11,13 @@
   ) {
   display: inline-flex;
 }
+/* 讀音 or 語音 (修訂本, 簡編本) and 大陸音讀, 詞 and 音 (兩岸詞典) are on a row of their own, below the headword */
+[data-sc-moedict="info-row-parent"] {
+  display: flex;
+  flex-wrap: wrap;
+  row-gap: 3px;
+  margin-top: 3px;
+}
 [data-sc-moedict="traditional-term"] {
   display: inline-block;
   line-height: 1;
@@ -54,77 +61,102 @@
   color: #ddcd4b;
   padding-left: 4px;
 }
+/* the rows of 似, 反 and 多音 line up with the headword and the row above them */
 [data-sc-moedict="additional-fields-parent"] {
-  padding-inline: 4px;
-  margin-top: 2px;
-}
-[data-sc-moedict="synonyms-parent"] {
-  margin-bottom: 3px;
-}
-[data-sc-moedict="synonyms-label"] {
-  display: inline-block;
-  line-height: 1;
-  background: #111;
-  border: 1px solid #454545;
-  border-radius: 4px;
-  color: #71bafd;
-  padding: 4px;
-  margin-right: 4px;
-}
-[data-sc-moedict="synonyms-content"] {
-  display: inline-block;
-  line-height: 1;
-  background: #111;
-  border: 1px solid #454545;
-  border-radius: 4px;
-  padding: 4px;
-}
-[data-sc-moedict="antonyms-label"] {
-  display: inline-block;
-  line-height: 1;
-  background: #111;
-  border: 1px solid #454545;
-  border-radius: 4px;
-  color: #fd7171;
-  padding: 4px;
-  margin-right: 4px;
-}
-[data-sc-moedict="antonyms-content"] {
-  display: inline-block;
-  line-height: 1;
-  background: #111;
-  border: 1px solid #454545;
-  border-radius: 4px;
-  padding: 4px;
-}
-/* 多音: the other readings of the headword */
-[data-sc-moedict="antonyms-parent"] + [data-sc-moedict="other-readings-parent"] {
   margin-top: 3px;
 }
-[data-sc-moedict="other-readings-label"] {
-  display: inline-block;
+/*
+ * 似, 反 and 多音 (the other readings of the headword): each a row with one box, the label
+ * divided from its value by a line, like 大陸音讀 and 讀音.
+ */
+:is(
+    [data-sc-moedict="synonyms-parent"],
+    [data-sc-moedict="antonyms-parent"],
+    [data-sc-moedict="other-readings-parent"]
+  ) {
+  display: flex;
+  width: fit-content;
   line-height: 1;
   background: #111;
+  font-size: 1.1em;
   border: 1px solid #454545;
   border-radius: 4px;
-  color: #ddcd4b;
   padding: 4px;
-  margin-right: 4px;
+}
+:is(
+    [data-sc-moedict="synonyms-parent"],
+    [data-sc-moedict="antonyms-parent"],
+    [data-sc-moedict="other-readings-parent"]
+  )
+  + :is(
+    [data-sc-moedict="synonyms-parent"],
+    [data-sc-moedict="antonyms-parent"],
+    [data-sc-moedict="other-readings-parent"]
+  ) {
+  margin-top: 3px;
+}
+:is(
+    [data-sc-moedict="synonyms-label"],
+    [data-sc-moedict="antonyms-label"],
+    [data-sc-moedict="other-readings-label"]
+  ) {
+  flex: none;
+  border-right: 1px solid #454545;
+  padding-right: 4px;
+}
+[data-sc-moedict="synonyms-label"] {
+  color: #71bafd;
+}
+[data-sc-moedict="antonyms-label"] {
+  color: #fd7171;
+}
+[data-sc-moedict="other-readings-label"] {
+  color: #ddcd4b;
+}
+:is([data-sc-moedict="synonyms-content"], [data-sc-moedict="antonyms-content"]) {
+  padding-left: 4px;
+}
+/* a long list of 似 or 反 wraps inside its box: room between its lines, none added above or below */
+:is([data-sc-moedict="synonyms-content"], [data-sc-moedict="antonyms-content"]) {
+  line-height: 1.4;
+  margin-block: -0.2em;
+}
+/*
+ * Several other readings: on one line while they fit, with a line between them. Every reading
+ * has the line on its left and is moved over it by 1px, so the line of a reading that starts a
+ * row falls outside the list, where it is cut off; after the label that leaves the label's line.
+ */
+[data-sc-moedict="other-readings-list"] {
+  display: flex;
+  flex-wrap: wrap;
+  row-gap: 4px;
+  overflow-x: clip;
 }
 [data-sc-moedict="other-readings-content"] {
-  display: inline-block;
-  line-height: 1;
-  background: #111;
-  border: 1px solid #454545;
-  border-radius: 4px;
-  padding: 4px;
-  margin-right: 4px;
+  border-left: 1px solid #454545;
+  margin-left: -1px;
+  padding-inline: 4px;
+}
+[data-sc-moedict="other-readings-content"]:last-child {
+  padding-right: 0;
 }
 [data-sc-moedict="other-readings-reading"] {
   padding-left: 4px;
 }
+/* a part of speech sits on the line of its first definition; the others line up below that one */
 [data-sc-moedict="pos-entry-parent"] {
+  display: flex;
+  align-items: baseline;
+  column-gap: 4px;
   margin-top: 2px;
+}
+[data-sc-moedict="pos-content"] {
+  flex: 1;
+  min-width: 0;
+}
+/* the "(1) …" items of a numbered heading ("2.稱謂：") start below its text, not below its number */
+[data-sc-moedict="definition-entry-items"][data-sc-numbered="true"] {
+  padding-left: 1em;
 }
 [data-sc-moedict="pos-label"] {
   display: inline-block;
@@ -134,12 +166,6 @@
   border-radius: 4px;
   padding: 4px;
   color: white;
-}
-/* margin when 2 pos labels go one after another (vertically) */
-[data-sc-moedict="pos-label"]:has(
-    + [data-sc-moedict="pos-content"] [data-sc-moedict="pos-label"]
-  ) {
-  margin-bottom: 2px;
 }
 [data-sc-moedict="definition-entry-example-parent"][data-sc-type="書"] {
   display: block;

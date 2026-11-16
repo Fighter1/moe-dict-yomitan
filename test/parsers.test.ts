@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { StructuredContentNode } from "../content.ts";
-import { definitionLines, getContent } from "../liangan.ts";
+import { definitionLines, getContent, getDefinitions } from "../liangan.ts";
 import { getMeaning, getOtherReadings, normalizeMeaning } from "../moe_dics.ts";
 import { htmlToContent, inlineHtml } from "../parse_html.ts";
 
@@ -48,6 +48,33 @@ test("修訂本: a part of speech is a line of its own; other brackets are text"
   assert.deepEqual(texts(meaning, "definition-entry-content"), ["1.(一)[動]2.4.之讀音。", "2.看守。", "姓。"]);
   assert.deepEqual(texts(meaning, "definition-entry-example-content"), ["「看門」、「看護」"]);
   assert.equal(find(meaning, "definition-entry").length, 3); // no empty definitions
+});
+
+test("修訂本/簡編本: a heading is a line of text with its numbered items below", () => {
+  const meaning = getMeaning(
+    normalizeMeaning("[名]\n1.姓。\n2.量詞：(1) 計算有柄器物的單位。如：「一把刀」。(2) 計算成束物品的單位。\n3.把手。"),
+    "Revised",
+  ); // 把
+  // only the part of speech is a label; the heading keeps its number and its colon
+  assert.deepEqual(texts(meaning, "pos-label"), ["名"]);
+  assert.deepEqual(texts(meaning, "definition-entry-content"), [
+    "1.姓。",
+    "2.量詞：",
+    "(1) 計算有柄器物的單位。",
+    "(2) 計算成束物品的單位。",
+    "3.把手。", // the line after the items is a definition of the part of speech again
+  ]);
+  const [items, ...others] = find(meaning, "definition-entry-items") as [AnyNode];
+  assert.equal(others.length, 0);
+  assert.equal(items.data?.numbered, "true"); // indented below "2."
+  assert.deepEqual(texts(items.content!, "definition-entry-content"), ["(1) 計算有柄器物的單位。", "(2) 計算成束物品的單位。"]);
+  assert.deepEqual(texts(items.content!, "definition-entry-example-content"), ["「一把刀」"]);
+
+  // a heading without a number (波耳), and the space 簡編本 puts after a few numbers
+  const [plain] = find(getMeaning("人名：(1) 甲。", "Revised"), "definition-entry-items") as [AnyNode];
+  assert.equal(plain.data?.numbered, undefined);
+  const spaced = getMeaning("7. 量詞：(1) 計算有柄器物的單位。", "Concised");
+  assert.deepEqual(texts(spaced, "definition-entry-content"), ["7.量詞：", "(1) 計算有柄器物的單位。"]);
 });
 
 test("修訂本: a chain of citations is taken apart in order", () => {
@@ -113,7 +140,33 @@ test("兩岸詞典: examples, notes and headings", () => {
   // the same example twice
   assert.equal(find(getContent("賀辭。[例]宜室宜家。[例]宜室宜家。", "桃灼呈祥"), "definition-entry-example-parent").length, 1);
   assert.deepEqual(texts(getContent("婉轉。∥也作「委婉」。", "婉轉"), "definition-entry-note"), ["也作「委婉」。"]);
-  assert.deepEqual(texts(getContent("10.量詞：", "口"), "pos-label"), ["10.量詞"]);
+});
+
+test("兩岸詞典: a heading is a line of text with its numbered items below", () => {
+  const definitions = getDefinitions(
+    ["9.指專業方向。", "10.量詞：", "(1)用於計算人數。[例]五口之家。", "(2)用於計算動作。", "11.姓。"],
+    "口",
+  );
+  assert.equal(definitions.length, 3);
+  assert.deepEqual(texts(definitions, "pos-label"), []); // no boxed label
+  assert.deepEqual(texts(definitions, "definition-entry-content"), [
+    "9.指專業方向。",
+    "10.量詞：",
+    "(1)用於計算人數。",
+    "(2)用於計算動作。",
+    "11.姓。",
+  ]);
+  const [items, ...others] = find(definitions, "definition-entry-items") as [AnyNode];
+  assert.equal(others.length, 0);
+  assert.deepEqual(texts(items.content!, "definition-entry-content"), ["(1)用於計算人數。", "(2)用於計算動作。"]);
+  assert.deepEqual(texts(items.content!, "definition-entry-example-content"), ["五口之家。"]);
+  // a line ending in a colon with nothing numbered after it is just a line (省略號)
+  const plain = getDefinitions(["2.用於引文的省略。例如：", "他說：「……」"], "省略號");
+  assert.equal(find(plain, "definition-entry-items").length, 0);
+  assert.equal(plain.length, 2);
+  // a cell with a table is kept whole
+  const [table] = getDefinitions(["<table><tr><td>乾</td></tr></table>"], "八卦") as [AnyNode];
+  assert.equal(table.data?.moedict, "meaning-parent");
 });
 
 test("兩岸詞典: inline HTML becomes structured content", () => {

@@ -75,8 +75,35 @@ export function definitionLines(cell: string): string[] {
   return lines;
 }
 
-/** One line of a definition: its text, a note after ∥, and the examples after each [例]. */
-export function getContent(line: string, term: string): StructuredContentNode {
+/** "3.量詞：" heads the "(1) …", "(2) …" lines that follow it. */
+const HEADING = /^\d+\..*：$/;
+const HEADING_ITEM = /^[(（]\d+[)）]/;
+
+/**
+ * The definitions of an entry, from the lines of its definition cells (a cell with a table is
+ * one line). As in the online dictionary, a heading is a line of text that ends in its colon;
+ * the numbered items that follow go below it, indented.
+ */
+export function getDefinitions(lines: string[], term: string): StructuredContentNode[] {
+  const definitions: StructuredContentNode[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (line.includes("<table")) {
+      definitions.push(div("meaning-parent", htmlToContent(line)));
+      continue;
+    }
+    const items: StructuredContentNode[] = [];
+    if (HEADING.test(line)) while (HEADING_ITEM.test(lines[i + 1] ?? "")) items.push(getContent(lines[++i]!, term));
+    definitions.push(getContent(line, term, items));
+  }
+  return definitions;
+}
+
+/**
+ * One line of a definition: its text, a note after ∥, the examples after each [例] and, for a
+ * heading, its items.
+ */
+export function getContent(line: string, term: string, items: StructuredContentNode[] = []): StructuredContentNode {
   let note: StructuredContentNode = "";
   const noteMatch = line.match(/[∥‖](.*)$/);
   if (noteMatch) {
@@ -86,16 +113,15 @@ export function getContent(line: string, term: string): StructuredContentNode {
   // "[例]" starts an example; a few cells have it twice, repeat the example or lost the "]"
   const [text = "", ...rest] = line.split(/\[例\]?/);
   const examples = [...new Set(rest.map((example) => example.trim()).filter(Boolean))];
-  // "3.量詞：" heads the definitions that follow it
-  const heading = /^\d+\..*：$/.test(text.trim());
   return div("definition-entry", [
-    span("definition-entry-content", heading ? [span("pos-label", [text.trim().slice(0, -1), { tag: "br" }])] : inlineHtml(text)),
+    span("definition-entry-content", inlineHtml(text)),
     note,
     ...examples.map((example) =>
       labelled("definition-entry-example", "例", [
         span("definition-entry-example-content", inlineHtml(example.replace(/[〜～]/g, term))),
       ]),
     ),
+    ...(items.length ? [div("definition-entry-items", items, { numbered: "true" })] : []),
   ]);
 }
 
@@ -156,27 +182,27 @@ export async function addTermsLiangAn(editions: Editions, path: string, populari
     // the sheet leaves 簡化字形 empty when it equals 正體字形, and writes 兒 as ㄦ in three erhua words
     const simplified = text(row, "簡化字形")?.replaceAll("ㄦ", "儿");
 
-    const definitions: StructuredContentNode[] = [];
+    const lines: string[] = [];
     for (let i = 1; i <= MAX_DEFINITIONS; i++) {
       let definition = text(row, `釋義${i}`)?.replaceAll("丨", "ㄧ"); // ㄧ as typed for vertical text
       if (!definition) break;
       const fix = DEFINITION_FIXES[termTrad];
       if (fix) definition = definition.replace(fix[0], fix[1]);
-      if (definition.includes("<table")) definitions.push(div("meaning-parent", htmlToContent(definition)));
-      else for (const line of definitionLines(definition)) definitions.push(getContent(line, termTrad));
+      if (definition.includes("<table")) lines.push(definition);
+      else lines.push(...definitionLines(definition));
     }
 
+    const info = getAdditionalInfo(
+      mainlandDiffers ? mainland : undefined,
+      // star is Mainland, triangle is Taiwan
+      text(row, "臺／陸特有詞"),
+      text(row, "臺／陸特有音"),
+    );
     const content: StructuredContent = [
-      span("first-row-parent", [
-        termsParent(termTrad, simplified),
-        ...getAdditionalInfo(
-          mainlandDiffers ? mainland : undefined,
-          // star is Mainland, triangle is Taiwan
-          text(row, "臺／陸特有詞"),
-          text(row, "臺／陸特有音"),
-        ),
-      ]),
-      div("meanings-parent", definitions),
+      span("first-row-parent", [termsParent(termTrad, simplified)]),
+      // 大陸音讀, 詞 and 音 go on a row of their own, below the headword
+      ...(info.length ? [div("info-row-parent", info)] : []),
+      div("meanings-parent", getDefinitions(lines, termTrad)),
     ];
     await addEntry(editions, {
       term: termTrad,

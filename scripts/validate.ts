@@ -4,7 +4,9 @@
 //   - isUpdatable + indexUrl/downloadUrl point at this repository's latest release, the sidecar
 //     index file next to the zip is the zip's own index.json, the revision has the shape Yomitan
 //     compares number by number and is the same in every zip
-//   - the golden words (dict/golden_words.tsv) are there with their readings
+//   - the golden words (dict/golden_words.tsv) are there with their readings, the lookup-only
+//     spellings among them as rows of the right entry that show the spelling after the headword,
+//     and the words it rules out are not
 //   - every image a definition refers to is in the zip, no U+FFFD (mangled astral characters)
 //   - the 注音 and 拼音 editions of a dictionary have the same number of entries and terms
 // Writes reports/stats.json (read by scripts/release-notes.ts) and, in GitHub Actions, a job summary.
@@ -49,14 +51,24 @@ const schemaErrors = (validate: ValidateFunction) =>
     .map((e) => `${e.instancePath || "/"} ${e.message}`)
     .join("; ");
 
-/** zip name -> the `term\treading` pairs that zip must contain. */
+type GoldenWords = {
+  /** rows the zip must contain; with `entryOf`, as a row of the entry that headword has under the same reading */
+  present: { term: string; reading: string; entryOf?: string }[];
+  /** terms the zip must have no row for */
+  absent: string[];
+};
+
+/** zip name -> what dict/golden_words.tsv says about that zip. */
 function readGoldenWords() {
-  const golden = new Map<string, string[]>();
+  const golden = new Map<string, GoldenWords>();
   for (const line of readFileSync(GOLDEN_WORDS_FILE, "utf-8").split(/\r?\n/)) {
     if (!line.trim() || line.startsWith("#")) continue;
-    const [stem, term, reading] = line.split("\t");
-    if (!stem || !term || reading === undefined) throw new Error(`${GOLDEN_WORDS_FILE}: cannot parse "${line}"`);
-    golden.set(`${stem}.zip`, [...(golden.get(`${stem}.zip`) ?? []), `${term}\t${reading}`]);
+    const [stem, term, reading, entryOf] = line.split("\t");
+    const words = golden.get(`${stem}.zip`) ?? { present: [], absent: [] };
+    if (stem && term?.startsWith("!") && term.length > 1 && reading === undefined) words.absent.push(term.slice(1));
+    else if (stem && term && !term.startsWith("!") && reading !== undefined) words.present.push({ term, reading, entryOf: entryOf || undefined });
+    else throw new Error(`${GOLDEN_WORDS_FILE}: cannot parse "${line}"`);
+    golden.set(`${stem}.zip`, words);
   }
   return golden;
 }
@@ -71,8 +83,23 @@ function imagePaths(node: unknown, out: Set<string>) {
   }
 }
 
+/** What the headword box of a glossary shows: "裡面", or "裡面、裏面" on the row of 裏面. */
+function headwordBox(node: unknown): string | undefined {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = headwordBox(child);
+      if (found !== undefined) return found;
+    }
+  } else if (node && typeof node === "object") {
+    const n = node as { content?: unknown; data?: Record<string, unknown> };
+    if (n.data?.moedict === "traditional-term") return typeof n.content === "string" ? n.content : "";
+    return headwordBox(n.content);
+  }
+  return undefined;
+}
+
 // entries: distinct sequence numbers (one per dictionary entry); terms: rows, which also include
-// the rows filed under the simplified spelling and under each reading
+// the rows filed under the simplified spelling, the lookup-only spellings and each reading
 export type Stats = { file: string; title: string; revision: string; entries: number; terms: number; termBanks: number; files: number; bytes: number };
 const stats: Stats[] = [];
 const problems: string[] = [];
@@ -121,7 +148,13 @@ for (const output of OUTPUTS) {
   // term and tag banks
   let terms = 0;
   let termBanks = 0;
-  const present = new Set<string>();
+  const present = new Map<string, Set<unknown>>(); // "term\treading" -> the sequence numbers of its rows
+  const presentTerms = new Set<unknown>();
+  const goldenWords = golden.get(file) ?? { present: [], absent: [] };
+  // the rows of the lookup-only spellings among the golden words: their entry and what they show
+  const lookupRows = new Map<string, { sequence: unknown; shows: string | undefined }[]>(
+    goldenWords.present.filter((word) => word.entryOf).map((word) => [`${word.term}\t${word.reading}`, []]),
+  );
   const sequences = new Set<unknown>();
   const images = new Set<string>();
   for (const name of [...names].sort()) {
@@ -138,16 +171,33 @@ for (const output of OUTPUTS) {
       termBanks++;
       terms += bank.length;
       for (const row of bank) {
-        present.add(`${row[0]}\t${row[1]}`);
+        const key = `${row[0]}\t${row[1]}`;
+        const rowSequences = present.get(key) ?? new Set();
+        present.set(key, rowSequences.add(row[6]));
+        presentTerms.add(row[0]);
+        lookupRows.get(key)?.push({ sequence: row[6], shows: headwordBox(row[5]) });
         sequences.add(row[6]);
         imagePaths(row[5], images);
       }
     }
   }
   if (!terms) fail("no term entries");
-  const goldenWords = golden.get(file) ?? [];
-  if (!goldenWords.length) fail(`${GOLDEN_WORDS_FILE} has no word for this zip`);
-  for (const word of goldenWords) if (!present.has(word)) fail(`golden word missing: ${word.replace("\t", " [")}]`);
+  if (!goldenWords.present.length) fail(`${GOLDEN_WORDS_FILE} has no word for this zip`);
+  for (const { term, reading, entryOf } of goldenWords.present) {
+    const key = `${term}\t${reading}`;
+    if (!present.has(key)) fail(`golden word missing: ${term} [${reading}]`);
+    else if (entryOf) {
+      // a lookup-only spelling: one of its rows must be a row of the headword's entry, and that
+      // row must show the spelling after the headword
+      const entry = present.get(`${entryOf}\t${reading}`);
+      const rows = (lookupRows.get(key) ?? []).filter((row) => entry?.has(row.sequence));
+      if (!entry) fail(`golden word missing: ${entryOf} [${reading}], whose entry ${term} should be filed under`);
+      else if (!rows.length) fail(`${term} [${reading}] is not a row of the entry of ${entryOf}`);
+      else if (!rows.some((row) => row.shows === `${entryOf}、${term}`))
+        fail(`the row of ${term} [${reading}] shows ${rows.map((row) => `"${row.shows}"`).join(", ")}, expected "${entryOf}、${term}"`);
+    }
+  }
+  for (const term of goldenWords.absent) if (presentTerms.has(term)) fail(`has a row for ${term}, which ${GOLDEN_WORDS_FILE} says it must not`);
   const missing = [...images].filter((image) => !names.has(image));
   if (missing.length) fail(`${missing.length} images are referenced but not in the zip, e.g. ${missing.slice(0, 3).join(", ")}`);
   if (!names.has("styles.css")) fail("no styles.css");

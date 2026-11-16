@@ -2,6 +2,7 @@
 import {
   addEntry,
   div,
+  isVariantStub,
   labelled,
   readSheet,
   span,
@@ -29,6 +30,13 @@ const PINYIN_TYPOS: Record<string, string> = {
   "jīnjiùyuàn diào mǎshǒuzhēn wén bìngxù": "jīngjiùyuàn diào mǎshǒuzhēn wén bìngxù", // 經舊苑弔馬守貞文並序 ㄐㄧㄥ
   "qiānr-bābǎ": "qiānr-bābǎi", // 千兒八百 (大陸) ㄅㄞˇ
   "mùyǔ-zhìfēn": "mùyǔ-zhìfēng", // 沐雨櫛風 (大陸) ㄈㄥ
+};
+
+// 簡化字形 cells that are wrong in the sheet itself. 著 read zhù is 著 in simplified characters
+// too; 着 is the 著 of 看著 and 著急.
+const SIMPLIFIED_TYPOS: Record<string, string> = {
+  积微成着: "积微成著", // 積微成著 ㄓㄨˋ
+  篆学琐着: "篆学琐著", // 篆學瑣著 ㄓㄨˋ
 };
 
 // Definition cells that are wrong in the sheet itself: 正體字形 -> [text in the sheet, corrected text].
@@ -180,7 +188,8 @@ export async function addTermsLiangAn(editions: Editions, path: string, populari
       (!!mainland.zhuyin && mainland.zhuyin !== main.zhuyin) || (!!mainland.pinyin && mainland.pinyin !== main.pinyin);
 
     // the sheet leaves 簡化字形 empty when it equals 正體字形, and writes 兒 as ㄦ in three erhua words
-    const simplified = text(row, "簡化字形")?.replaceAll("ㄦ", "儿");
+    const simplifiedCell = text(row, "簡化字形")?.replaceAll("ㄦ", "儿");
+    const simplified = simplifiedCell && (SIMPLIFIED_TYPOS[simplifiedCell] ?? simplifiedCell);
 
     const lines: string[] = [];
     for (let i = 1; i <= MAX_DEFINITIONS; i++) {
@@ -213,6 +222,7 @@ export async function addTermsLiangAn(editions: Editions, path: string, populari
       // 音序 is empty for a headword with one reading and "1.", "2.", … for the readings of one with several
       score: popularityBoost - (parseInt(text(row, "音序") ?? "") || 0),
       content,
+      variantStub: lines.length === 1 && isVariantStub(lines[0]!),
     });
     if (sequence % 10000 === 0) console.log(`Processed ${sequence} entries`);
   }

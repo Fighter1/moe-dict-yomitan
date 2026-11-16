@@ -4,6 +4,15 @@
 # simplified headword rows, the neutral tone, erhua, a missing apostrophe in the sheet (南歐) and
 # characters outside the BMP. 八輩兒五沒根基 is filed under its 變 (variant) reading, which depends on
 # the 變體類型 column of the sheet.
+#
+# A fourth column names a headword: the row must then be one of the rows of that headword's entry
+# (same reading, same sequence number) and show the term after that headword: 裡面、裏面. That is
+# how the lookup-only spellings of spellings.ts are checked: 修訂本 has 爲 as an entry of its own,
+# so its mere presence would prove nothing.
+#
+# A line with only a zip name and !term says the zip must have no row for that term. 著名 is read
+# zhù, so it must not be filed under 着名; nor 編著 under the simplified 编着, which is what OpenCC
+# alone makes of it.
 liangancidian-pinyin	學習	xué xí
 liangancidian-pinyin	学习	xué xí
 liangancidian-pinyin	長	cháng
@@ -52,3 +61,49 @@ moe-revised-zhuyin	𫐈	ㄅㄚˊ
 moe-revised-pinyin	八輩兒五沒根基	bá bèr wǔ méi gēn jī
 moe-revised-zhuyin	八輩兒五沒根基	ㄅㄚˊㄅㄜˋㄦㄨˇㄇㄟˊㄍㄣㄐㄧ
 liangancidian-pinyin	拖後腿	tuō hòu tuǐ
+moe-concised-zhuyin	裏面	ㄌㄧˇㄇㄧㄢˋ	裡面
+moe-concised-zhuyin	羣眾	ㄑㄩㄣˊㄓㄨㄥˋ	群眾
+moe-concised-zhuyin	羣衆	ㄑㄩㄣˊㄓㄨㄥˋ	群眾
+moe-concised-zhuyin	爲	ㄨㄟˊ	為
+moe-concised-zhuyin	!着名
+moe-concised-pinyin	裏面	lǐ miàn	裡面
+moe-concised-pinyin	羣眾	qún zhòng	群眾
+moe-concised-pinyin	羣衆	qún zhòng	群眾
+moe-concised-pinyin	爲	wéi	為
+moe-concised-pinyin	!着名
+moe-revised-zhuyin	裏面	ㄌㄧˇㄇㄧㄢˋ	裡面
+moe-revised-zhuyin	羣眾	ㄑㄩㄣˊㄓㄨㄥˋ	群眾
+moe-revised-zhuyin	羣衆	ㄑㄩㄣˊㄓㄨㄥˋ	群眾
+moe-revised-zhuyin	爲	ㄨㄟˊ	為
+moe-revised-zhuyin	!着名
+moe-revised-pinyin	裏面	lǐ miàn	裡面
+moe-revised-pinyin	羣眾	qún zhòng	群眾
+moe-revised-pinyin	羣衆	qún zhòng	群眾
+moe-revised-pinyin	爲	wéi	為
+moe-revised-pinyin	!着名
+liangancidian-zhuyin	裏面	ㄌㄧˇㄇㄧㄢˋ	裡面
+liangancidian-zhuyin	羣眾	ㄑㄩㄣˊㄓㄨㄥˋ	群眾
+liangancidian-zhuyin	羣衆	ㄑㄩㄣˊㄓㄨㄥˋ	群眾
+liangancidian-zhuyin	爲	ㄨㄟˊ	為
+liangancidian-zhuyin	!着名
+liangancidian-pinyin	裏面	lǐ miàn	裡面
+liangancidian-pinyin	羣眾	qún zhòng	群眾
+liangancidian-pinyin	羣衆	qún zhòng	群眾
+liangancidian-pinyin	爲	wéi	為
+liangancidian-pinyin	!着名
+moe-concised-zhuyin	编著	ㄅㄧㄢㄓㄨˋ
+moe-concised-zhuyin	!编着
+moe-concised-pinyin	编著	biān zhù
+moe-concised-pinyin	!编着
+moe-revised-zhuyin	编著	ㄅㄧㄢㄓㄨˋ
+moe-revised-zhuyin	!编着
+moe-revised-pinyin	编著	biān zhù
+moe-revised-pinyin	!编着
+liangancidian-zhuyin	编著	ㄅㄧㄢㄓㄨˋ
+liangancidian-zhuyin	!编着
+liangancidian-pinyin	编著	biān zhù
+liangancidian-pinyin	!编着
+liangancidian-zhuyin	积微成著	ㄐㄧㄨㄟˊㄔㄥˊㄓㄨˋ
+liangancidian-zhuyin	!积微成着
+liangancidian-pinyin	积微成著	jī wéi chéng zhù
+liangancidian-pinyin	!积微成着

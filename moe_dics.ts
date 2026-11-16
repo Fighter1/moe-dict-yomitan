@@ -1,9 +1,9 @@
 // 國語辭典簡編本 ("Concised") and 重編國語辭典修訂本 ("Revised"): one sheet each, same columns.
 import { readdirSync } from "fs";
-import { OpenCC } from "opencc";
 import {
   addEntry,
   div,
+  isVariantStub,
   labelled,
   readSheet,
   span,
@@ -16,6 +16,7 @@ import {
 import { buildNotes } from "./notes.ts";
 import { toneMismatches, zhuyinReading, zhuyinToPinyin } from "./pinyin.ts";
 import { hasReading, readingSpans, type SystemReadings } from "./readings.ts";
+import { simplifiedSpelling } from "./spellings.ts";
 
 export type Kind = "Concised" | "Revised";
 
@@ -310,7 +311,6 @@ export async function addTermsMoe(
   // without a reading; they are read like the entry they point at (00031).
   const readingsById = new Map(entries.filter((e) => hasReading(e.readings.main)).map((e) => [e.id, e.readings.main]));
 
-  const simplifiedConverter = new OpenCC("tw2s.json");
   // One sequence number per source entry, shared by its traditional and simplified rows and
   // identical in both editions, so consumers can group them back together.
   let sequence = 0;
@@ -331,7 +331,7 @@ export async function addTermsMoe(
       );
     if (otherReadings) additionalFields.push(getOtherReadings(otherReadings));
 
-    const simplified = simplifiedConverter.convertSync(term);
+    const simplified = simplifiedSpelling(term, main.pinyin ?? "");
     const altReading = getAltReadingContent(altReadingType, readings.alt);
     const content: StructuredContent = [
       span("first-row-parent", [termsParent(term, simplified)]),
@@ -360,6 +360,7 @@ export async function addTermsMoe(
       // 多音排序 is 0 for a headword with one reading and 1, 2, … for the readings of one with several
       score: popularityBoost - (Number(row.多音排序) || 0),
       content,
+      variantStub: isVariantStub(text(row, "釋義") ?? ""),
     });
     if (sequence % 10000 === 0) console.log(`Processed ${sequence} entries`);
   }

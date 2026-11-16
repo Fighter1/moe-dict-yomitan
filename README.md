@@ -8,6 +8,11 @@ Yomitan dictionaries built from Taiwan's Ministry of Education dictionaries, eac
 | 重編國語辭典修訂本 | [moe-revised-zhuyin.zip](https://github.com/Fighter1/moe-dict-yomitan/releases/latest/download/moe-revised-zhuyin.zip) | [moe-revised-pinyin.zip](https://github.com/Fighter1/moe-dict-yomitan/releases/latest/download/moe-revised-pinyin.zip) |
 | 兩岸詞典 | [liangancidian-zhuyin.zip](https://github.com/Fighter1/moe-dict-yomitan/releases/latest/download/liangancidian-zhuyin.zip) | [liangancidian-pinyin.zip](https://github.com/Fighter1/moe-dict-yomitan/releases/latest/download/liangancidian-pinyin.zip) |
 
+The headwords are in Taiwan's traditional forms (裡面, 群眾, 為). An entry is also found under:
+
+- its simplified form (里面, 群众, 为), which it shows next to the headword;
+- its Hong Kong spelling (裏面, 羣眾) and the spelling a conversion with OpenCC's default settings produces (裏面, 羣衆, 爲), where they differ from the headword. These are for lookup only: an entry found by its headword or simplified form does not show them. Found by one of them, it shows that spelling after the headword (裡面、裏面), so the reader sees the word they looked up.
+
 Import a zip in Yomitan → Settings → Dictionaries → Import. The zips are self-updating: *Check for updates* on the same page offers the newest release. A zip installed from an older source of these dictionaries has to be imported again once, because it asks a different address for updates.
 
 # Build
@@ -21,12 +26,12 @@ npm run build
 npm run validate
 ```
 
-- `npm test` runs the unit tests in `test/`: the parsers, the pinyin handling and the revision rules. They need no sheets.
+- `npm test` runs the unit tests in `test/`: the parsers, the pinyin handling, the lookup spellings and the revision rules. They need no sheets.
 - `npm run build` writes the six zips and their `index-*.json` files to `build/`, and what it noticed about the sheets to `reports/build.json`.
 - `npm run validate` checks the zips in `build/` and writes their entry counts to `reports/stats.json`. It checks that:
   - all six zips are there, with the same revision, and every zip, term bank and index passes Yomitan's schemas (`schemas/`, copied from the [Yomitan repository](https://github.com/yomidevs/yomitan/tree/master/ext/data/schemas));
   - the update URLs point at this repository and the `index-*.json` next to each zip is the zip's own index;
-  - the golden words in `dict/golden_words.tsv` are present with their readings;
+  - the golden words in `dict/golden_words.tsv` are present with their readings, the lookup-only spellings among them as rows of the right entry that show the spelling after the headword, and the words it rules out (着名) are absent;
   - every referenced image is in the zip, and the 注音 and 拼音 editions of a dictionary have the same entries.
 - `npm run typecheck` runs TypeScript. The files themselves are run by Node, which only strips the types.
 
@@ -48,7 +53,8 @@ Three environment variables change what a build produces:
 | `release.ts` | the list of zips, the shape of a revision, the update repository |
 | `moe_dics.ts` | 國語辭典簡編本 and 重編國語辭典修訂本 |
 | `liangan.ts` | 兩岸詞典 |
-| `content.ts` | what the parsers share: reading a sheet, building structured content, adding an entry |
+| `content.ts` | what the parsers share: reading a sheet, building structured content, adding an entry under every spelling it is found by |
+| `spellings.ts` | the other spellings of a headword: Hong Kong's and OpenCC's standard for lookup, and the simplified form where the sheet has none |
 | `pinyin.ts`, `utils.ts` | splitting joined pinyin, checking it against zhuyin, zhuyin → pinyin |
 | `parse_html.ts` | the tables and inline HTML in 兩岸詞典 definitions |
 | `readings.ts` | both editions carry both reading systems; each edition's `styles.css` hides the other |
@@ -59,7 +65,7 @@ Three environment variables change what a build produces:
 | `test/` | the unit tests |
 | `dict/` | the source sheets, `sources.json` and `golden_words.tsv` |
 
-The sheets in `dict/` are the upstream files as they are. Corrections to them live in the code: `PINYIN_TYPOS` and `DEFINITION_FIXES` in `liangan.ts`.
+The sheets in `dict/` are the upstream files as they are. Corrections to them live in the code: `PINYIN_TYPOS`, `SIMPLIFIED_TYPOS` and `DEFINITION_FIXES` in `liangan.ts`.
 
 A build reports the readings it could not take from the sheets as they are. The lists are in `reports/build.json` and in the release notes:
 

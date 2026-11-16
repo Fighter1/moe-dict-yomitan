@@ -102,7 +102,16 @@ jobs:
           # Yomitan only offers a revision that is newer than the installed one.
           latest="$(jq -r '.tagName // empty' "$RUNNER_TEMP/previous.json")"
           node scripts/validate.ts --revision "$REVISION" ${latest:+--after "$latest"}
-          node scripts/release-notes.ts --previous "$RUNNER_TEMP/previous.json"
+          # The commits since the previous release, from the API: the checkout has no history.
+          # Without the file the notes leave the commits out, which is also what a failed request
+          # gets; it must not fail the release.
+          rm -f "$RUNNER_TEMP/commits.json"
+          if [ -n "$latest" ]; then
+            gh api "repos/$GITHUB_REPOSITORY/compare/$latest...$GITHUB_SHA" \
+              --jq '[.commits[] | {sha, message: .commit.message}]' > "$RUNNER_TEMP/commits.json" ||
+              rm -f "$RUNNER_TEMP/commits.json"
+          fi
+          node scripts/release-notes.ts --previous "$RUNNER_TEMP/previous.json" --commits "$RUNNER_TEMP/commits.json"
           cat reports/release-notes.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the zips
@@ -140,4 +149,4 @@ jobs:
         run: |
           gh release create "v$REVISION" build/*.zip build/index-*.json \
             --target "$GITHUB_SHA" --title "v$REVISION" --latest \
-            --notes-file reports/release-notes.md --generate-notes
+            --notes-file reports/release-notes.md

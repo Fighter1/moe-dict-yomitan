@@ -26,7 +26,7 @@ npm run build
 npm run validate
 ```
 
-- `npm test` runs the unit tests in `test/`: the parsers, the pinyin handling, the lookup spellings and the revision rules. They need no sheets.
+- `npm test` runs the unit tests in `test/`: the parsers, the pinyin handling, the lookup spellings, the revision rules and the *Changes since* section of the release notes. They need no sheets.
 - `npm run build` writes the six zips and their `index-*.json` files to `build/`, and what it noticed about the sheets to `reports/build.json`.
 - `npm run validate` checks the zips in `build/` and writes their entry counts to `reports/stats.json`. It checks that:
   - all six zips are there, with the same revision, and every zip, term bank and index passes Yomitan's schemas (`schemas/`, copied from the [Yomitan repository](https://github.com/yomidevs/yomitan/tree/master/ext/data/schemas));
@@ -61,7 +61,7 @@ Three environment variables change what a build produces:
 | `notes.ts` | what a build noticed about the sheets, for `reports/build.json` |
 | `styles.css` | the styles every zip gets |
 | `d.d.ts` | types of the `pinyin-tone-tool` package |
-| `scripts/` | `validate.ts`, `release-notes.ts`, `upstream-check.ts` |
+| `scripts/` | `validate.ts`, `release-notes.ts` with `changes-since.ts`, `upstream-check.ts` |
 | `test/` | the unit tests |
 | `dict/` | the source sheets, `sources.json` and `golden_words.tsv` |
 
@@ -75,7 +75,7 @@ A build reports the readings it could not take from the sheets as they are. The 
 
 # Release
 
-Run the **Build and release** workflow from the Actions tab. It tests, builds, validates and publishes the zips as the latest release, tagged `v<revision>`, where the revision is the UTC date plus the run number. Its notes list the dictionaries with their entry counts, the versions of the source sheets and what changed since the previous release.
+Run the **Build and release** workflow from the Actions tab. It tests, builds, validates and publishes the zips as the latest release, tagged `v<revision>`, where the revision is the UTC date plus the run number. Its notes list the dictionaries with their entry and term counts and the versions of the source sheets. A *Changes since* section follows: every zip's entries and terms with their change from the previous release (entries are what a dictionary defines, terms the spellings and readings they are found by), whether the source sheets are the same, the commits since that release, and a *Full Changelog* link to GitHub's comparison of the two tags. The notes are entirely the script's; GitHub's generated notes are not added.
 
 It has two inputs: `publish` (off: build only, the zips are kept as a workflow artifact) and `revision` (to choose the revision yourself). It refuses to publish from another branch than the default one, a commit that is no longer the head of that branch, a tag that exists, and a revision that is not newer than the latest release, because Yomitan would not offer it.
 

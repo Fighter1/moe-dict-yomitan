@@ -321,14 +321,13 @@ export async function addTermsMoe(
     const synonyms = text(row, "相似詞");
     const antonyms = text(row, "相反詞");
     const otherReadings = text(row, "多音參見訊息");
+    // 似 and 反 share a row; 多音 has the next one
+    const relations: StructuredContentNode[] = [];
     if (synonyms)
-      additionalFields.push(
-        labelled("synonyms", "似", [span("synonyms-content", synonyms.replace("[似]", "").trim())], { tag: "div" }),
-      );
+      relations.push(labelled("synonyms", "似", [span("synonyms-content", synonyms.replace("[似]", "").trim())], { tag: "div" }));
     if (antonyms)
-      additionalFields.push(
-        labelled("antonyms", "反", [span("antonyms-content", antonyms.replace("[反]", "").trim())], { tag: "div" }),
-      );
+      relations.push(labelled("antonyms", "反", [span("antonyms-content", antonyms.replace("[反]", "").trim())], { tag: "div" }));
+    if (relations.length) additionalFields.push(div("relations-parent", relations));
     if (otherReadings) additionalFields.push(getOtherReadings(otherReadings));
 
     const simplified = simplifiedSpelling(term, main.pinyin ?? "");

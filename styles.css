@@ -65,9 +65,19 @@
 [data-sc-moedict="additional-fields-parent"] {
   margin-top: 3px;
 }
+/* 似 and 反 share a row while both fit; a list too long for that moves to a line of its own */
+[data-sc-moedict="relations-parent"] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 3px 6px;
+}
+[data-sc-moedict="relations-parent"] + [data-sc-moedict="other-readings-parent"] {
+  margin-top: 3px;
+}
 /*
- * 似, 反 and 多音 (the other readings of the headword): each a row with one box, the label
- * divided from its value by a line, like 大陸音讀 and 讀音.
+ * 似, 反 and 多音 (the other readings of the headword): one box each, the label divided from its
+ * value by a line, like 大陸音讀 and 讀音.
  */
 :is(
     [data-sc-moedict="synonyms-parent"],
@@ -82,18 +92,6 @@
   border: 1px solid #454545;
   border-radius: 4px;
   padding: 4px;
-}
-:is(
-    [data-sc-moedict="synonyms-parent"],
-    [data-sc-moedict="antonyms-parent"],
-    [data-sc-moedict="other-readings-parent"]
-  )
-  + :is(
-    [data-sc-moedict="synonyms-parent"],
-    [data-sc-moedict="antonyms-parent"],
-    [data-sc-moedict="other-readings-parent"]
-  ) {
-  margin-top: 3px;
 }
 :is(
     [data-sc-moedict="synonyms-label"],
